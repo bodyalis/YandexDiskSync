@@ -14,6 +14,26 @@ export const RETRYABLE_STATUSES = new Set<number>([408, 423, 425, 429, 500, 502,
 // Default concurrency for upload/download phases
 export const DEFAULT_CONCURRENCY = 4;
 
+// Subfolder on Yandex Disk that mirrors the local .obsidian/ config directory.
+// Stored separately from notes so it never appears in the user's normal vault listing
+// and so a regular note named "config" can't collide.
+export const OBSIDIAN_CONFIG_REMOTE_SUBFOLDER = '.obsidian-config';
+
+// Plugin id of THIS plugin — its own settings folder is always excluded from
+// config-sync to avoid clobbering settings/manifest across machines.
+export const SELF_PLUGIN_ID = 'yandex-disk-sync';
+
+// Files inside .obsidian/ that are NEVER synced (they are session/cache state
+// and would create constant churn / cross-platform conflicts).
+export const OBSIDIAN_CONFIG_FORCED_EXCLUDES = [
+    'workspace',
+    'workspace.json',
+    'workspace-mobile.json',
+    'cache',
+    '.DS_Store',
+    'Thumbs.db',
+];
+
 // Default included extensions
 export const DEFAULT_INCLUDED_EXTENSIONS = [
     'md',

@@ -39,6 +39,14 @@ const en = {
     confirmCreateFolderDesc: 'The folder "{0}" does not exist on Yandex Disk. Create it now?',
     confirmCreateFolderBtn: 'Create folder',
 
+    // Config sync
+    noticeConfigSynced: 'Obsidian config: ↑{0} ↓{1} ✕{2}',
+    progressPhaseSyncingConfig: 'Syncing config: {0}',
+    confirmEnableConfigSyncTitle: 'Sync Obsidian config?',
+    confirmEnableConfigSyncDesc:
+        'This will sync your .obsidian/ folder (settings, hotkeys, themes, snippets, plugin lists) between devices via Yandex Disk.\n\nAlways excluded: workspace*, cache, this plugin\u2019s own folder.\nRecommended excludes (toggle below): plugin data.json (may contain API keys), compiled plugin files, hotkeys.\n\nUse with care — a broken setting on one machine will propagate to others. Continue?',
+    confirmEnableConfigSyncBtn: 'Enable',
+
     // Settings — sections
     settingAccountHeader: 'Account',
     settingSyncHeader: 'Sync behaviour',
@@ -69,6 +77,18 @@ const en = {
     settingExcludeGlobsDesc:
         'One pattern per line. Matches vault-relative paths. Use * for one segment, ** for any depth. Example: Drafts/**, **/Inbox/*.md. Lines starting with # are ignored.',
     settingExcludeGlobsPlaceholder: 'Drafts/**\n**/Inbox/*.md',
+    settingObsidianConfigHeader: 'Obsidian config sync (experimental)',
+    settingSyncObsidianConfigName: 'Sync Obsidian config (.obsidian/)',
+    settingSyncObsidianConfigDesc:
+        'Sync settings, hotkeys, themes, snippets and the list of installed plugins between devices. workspace*, cache and this plugin\u2019s own folder are always skipped. Files are stored on Yandex Disk under .obsidian-config/.',
+    settingExcludePluginDataName: 'Exclude plugin data (data.json)',
+    settingExcludePluginDataDesc:
+        'Recommended. Plugin data files often contain API keys, passwords or per-machine state.',
+    settingExcludePluginBinariesName: 'Exclude compiled plugins',
+    settingExcludePluginBinariesDesc:
+        'Recommended. Skip main.js, styles.css, manifest.json — these are re-installed automatically from the catalog when you enable a plugin from community-plugins.json.',
+    settingExcludeHotkeysName: 'Exclude hotkeys',
+    settingExcludeHotkeysDesc: 'Recommended on mixed Windows/macOS setups: hotkeys differ (Ctrl vs Cmd).',
     settingEnableDeleteName: 'Enable deletion',
     settingEnableDeleteDesc: 'Delete on Yandex Disk what was deleted locally (and vice-versa with two-way sync).',
     settingConfirmDeleteName: 'Confirm before deletion',
@@ -200,6 +220,13 @@ const ru: typeof en = {
     confirmCreateFolderDesc: 'Папка «{0}» отсутствует на Яндекс.Диске. Создать её?',
     confirmCreateFolderBtn: 'Создать папку',
 
+    noticeConfigSynced: 'Конфиг Obsidian: ↑{0} ↓{1} ✕{2}',
+    progressPhaseSyncingConfig: 'Синхронизация конфига: {0}',
+    confirmEnableConfigSyncTitle: 'Синхронизировать конфиг Obsidian?',
+    confirmEnableConfigSyncDesc:
+        'Папка .obsidian/ (настройки, хоткеи, темы, сниппеты, список плагинов) будет синхронизироваться между устройствами.\n\nВсегда исключаются: workspace*, cache, папка этого плагина.\nРекомендуемые исключения (переключатели ниже): data.json плагинов (в них могут быть API-ключи), собранные файлы плагинов, хоткеи.\n\nОсторожно — сломанная настройка разъедется на все машины. Продолжить?',
+    confirmEnableConfigSyncBtn: 'Включить',
+
     settingAccountHeader: 'Аккаунт',
     settingSyncHeader: 'Поведение синхронизации',
     settingDeletionHeader: 'Удаление',
@@ -228,6 +255,18 @@ const ru: typeof en = {
     settingExcludeGlobsDesc:
         'Один шаблон на строку. Сравнивается с путём от корня vault. * — один уровень, ** — любая глубина. Примеры: Drafts/**, **/Inbox/*.md. Строки с # в начале игнорируются.',
     settingExcludeGlobsPlaceholder: 'Drafts/**\n**/Inbox/*.md',
+    settingObsidianConfigHeader: 'Синхронизация конфига Obsidian (эксперимент)',
+    settingSyncObsidianConfigName: 'Синхронизировать конфиг Obsidian (.obsidian/)',
+    settingSyncObsidianConfigDesc:
+        'Синхронизировать настройки, хоткеи, темы, сниппеты и список установленных плагинов между устройствами. workspace*, cache и папка этого плагина всегда пропускаются. Файлы хранятся на Я.Диске в .obsidian-config/.',
+    settingExcludePluginDataName: 'Исключить data.json плагинов',
+    settingExcludePluginDataDesc:
+        'Рекомендуется. В data.json часто лежат API-ключи, пароли или состояние, зависящее от машины.',
+    settingExcludePluginBinariesName: 'Исключить собранные плагины',
+    settingExcludePluginBinariesDesc:
+        'Рекомендуется. Пропускать main.js, styles.css, manifest.json — они переустановятся из каталога при включении плагина из community-plugins.json.',
+    settingExcludeHotkeysName: 'Исключить хоткеи',
+    settingExcludeHotkeysDesc: 'Рекомендуется, если используете Windows + macOS: хоткеи различаются (Ctrl vs Cmd).',
     settingEnableDeleteName: 'Удалять файлы',
     settingEnableDeleteDesc: 'Удалять на Я.Диске то, что удалено локально (и наоборот при двусторонней синхронизации).',
     settingConfirmDeleteName: 'Подтверждение перед удалением',

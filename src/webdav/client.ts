@@ -201,11 +201,12 @@ export class YandexWebDavClient {
     /**
      * PROPFIND with Depth: infinity. Returns entries relative to `rootFolder`,
      * filtered to files matching `extensions`, excluding the Logs/ subfolder
-     * and the trash folder.
+     * and the trash folder. Pass `null` for `extensions` to accept all files
+     * regardless of extension (used by the config-sync engine).
      */
     async listFiles(
         rootFolder: string,
-        extensions: Set<string>,
+        extensions: Set<string> | null,
         excludeSubfolders: string[] = [REMOTE_LOGS_SUBFOLDER],
     ): Promise<Map<string, DavEntry>> {
         const result = new Map<string, DavEntry>();
@@ -277,7 +278,7 @@ export class YandexWebDavClient {
             }
 
             const ext = rel.split('.').pop()?.toLowerCase() ?? '';
-            if (!extensions.has(ext)) continue;
+            if (extensions !== null && !extensions.has(ext)) continue;
 
             const lmNode = node.getElementsByTagNameNS('DAV:', 'getlastmodified')[0];
             let mtime = 0;

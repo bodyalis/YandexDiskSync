@@ -126,6 +126,67 @@ export class YandexSyncSettingTab extends PluginSettingTab {
                     });
             });
 
+        // ==== Obsidian config sync (experimental) ====
+        new Setting(containerEl).setName(t('settingObsidianConfigHeader')).setHeading();
+
+        new Setting(containerEl)
+            .setName(t('settingSyncObsidianConfigName'))
+            .setDesc(t('settingSyncObsidianConfigDesc'))
+            .addToggle((toggle) =>
+                toggle.setValue(s.syncObsidianConfig).onChange(async (v) => {
+                    if (v && !s.syncObsidianConfig) {
+                        // Show warning before enabling
+                        toggle.setValue(false); // revert until user confirms
+                        new ConfirmModal(
+                            this.app,
+                            t('confirmEnableConfigSyncTitle'),
+                            t('confirmEnableConfigSyncDesc'),
+                            t('confirmEnableConfigSyncBtn'),
+                            true,
+                            async (ok) => {
+                                if (!ok) return;
+                                s.syncObsidianConfig = true;
+                                toggle.setValue(true);
+                                await this.plugin.saveSettings();
+                            },
+                        ).open();
+                        return;
+                    }
+                    s.syncObsidianConfig = v;
+                    await this.plugin.saveSettings();
+                }),
+            );
+
+        new Setting(containerEl)
+            .setName(t('settingExcludePluginDataName'))
+            .setDesc(t('settingExcludePluginDataDesc'))
+            .addToggle((toggle) =>
+                toggle.setValue(s.excludeObsidianPluginData).onChange(async (v) => {
+                    s.excludeObsidianPluginData = v;
+                    await this.plugin.saveSettings();
+                }),
+            );
+
+        new Setting(containerEl)
+            .setName(t('settingExcludePluginBinariesName'))
+            .setDesc(t('settingExcludePluginBinariesDesc'))
+            .addToggle((toggle) =>
+                toggle.setValue(s.excludeObsidianPluginBinaries).onChange(async (v) => {
+                    s.excludeObsidianPluginBinaries = v;
+                    await this.plugin.saveSettings();
+                }),
+            );
+
+        new Setting(containerEl)
+            .setName(t('settingExcludeHotkeysName'))
+            .setDesc(t('settingExcludeHotkeysDesc'))
+            .addToggle((toggle) =>
+                toggle.setValue(s.excludeObsidianHotkeys).onChange(async (v) => {
+                    s.excludeObsidianHotkeys = v;
+                    await this.plugin.saveSettings();
+                }),
+            );
+
         // ==== Deletion ====
         new Setting(containerEl).setName(t('settingDeletionHeader')).setHeading();
 

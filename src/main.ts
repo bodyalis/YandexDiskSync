@@ -4,6 +4,7 @@ import { LogWriter } from './logging/writer';
 import { YandexSyncSettingTab } from './settings/SettingsTab';
 import { DEFAULT_SETTINGS, YandexSyncSettings, migrateSettings } from './settings/types';
 import { SyncEngine, SyncCallbacks } from './sync/SyncEngine';
+import { ConfigSyncEngine, ConfigSyncReport } from './sync/configSync';
 import { SessionReport } from './sync/SessionReport';
 import { ConflictModal, ConfirmModal, ProgressModal, SelectionModal } from './ui/modals';
 import { YandexWebDavClient } from './webdav/client';
@@ -290,8 +291,37 @@ export default class YandexSyncPlugin extends Plugin {
         };
 
         let session: SessionReport | null = null;
+        let configReport: ConfigSyncReport | null = null;
         try {
             session = await engine.run(callbacks, dryRun);
+            // Run config sync after main note sync, only if enabled and main sync wasn't aborted/cancelled.
+            if (
+                this.settings.syncObsidianConfig &&
+                session &&
+                !session.cancelled &&
+                !session.aborted
+            ) {
+                const configEngine = new ConfigSyncEngine(
+                    this.app,
+                    this.settings,
+                    client,
+                    () => this.saveSettings(),
+                );
+                configReport = await configEngine.run(
+                    {
+                        isCancelled: () => cancelledByUser,
+                        onProgress: (current, total, file) => {
+                            progress.update(
+                                t('progressPhaseSyncingConfig', file),
+                                current,
+                                total,
+                                file,
+                            );
+                        },
+                    },
+                    dryRun,
+                );
+            }
         } finally {
             progress.close();
             this.isSyncing = false;
@@ -335,6 +365,16 @@ export default class YandexSyncPlugin extends Plugin {
             }
         } else {
             this.statusBar.setText(t('statusError'));
+        }
+
+        // Surface config-sync results in a small follow-up notice (non-silent only).
+        if (configReport && !silent && !configReport.cancelled && !configReport.aborted) {
+            const up = configReport.uploaded.length;
+            const dn = configReport.downloaded.length;
+            const del = configReport.deletedRemote.length + configReport.deletedLocal.length;
+            if (up + dn + del > 0) {
+                new Notice(t('noticeConfigSynced', up, dn, del));
+            }
         }
 
         // If files changed during the sync, run another silent pass to pick them up.

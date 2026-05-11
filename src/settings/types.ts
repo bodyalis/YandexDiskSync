@@ -29,6 +29,17 @@ export interface YandexSyncSettings {
     // Manifest (per-file state)
     manifest: Record<string, ManifestEntry>;
 
+    // Obsidian config sync (.obsidian/) — opt-in
+    syncObsidianConfig: boolean;
+    /** Skip plugin data.json files (often contain API keys / passwords). */
+    excludeObsidianPluginData: boolean;
+    /** Skip plugin compiled artifacts (main.js, styles.css, manifest.json) — installed from catalog. */
+    excludeObsidianPluginBinaries: boolean;
+    /** Skip hotkeys.json (often differs between OS — Cmd vs Ctrl). */
+    excludeObsidianHotkeys: boolean;
+    /** Manifest for config files; separate to avoid colliding with note manifest. */
+    configManifest: Record<string, ManifestEntry>;
+
     // Deletion
     enableDelete: boolean;
     confirmBeforeDelete: boolean;
@@ -67,6 +78,12 @@ export const DEFAULT_SETTINGS: YandexSyncSettings = {
     excludeGlobs: [],
 
     manifest: {},
+
+    syncObsidianConfig: false,
+    excludeObsidianPluginData: true,
+    excludeObsidianPluginBinaries: true,
+    excludeObsidianHotkeys: false,
+    configManifest: {},
 
     enableDelete: true,
     confirmBeforeDelete: true,
@@ -111,6 +128,9 @@ export function migrateSettings(raw: any): any {
         }
     } else {
         raw.manifest = {};
+    }
+    if (!raw.configManifest || typeof raw.configManifest !== 'object') {
+        raw.configManifest = {};
     }
     return raw;
 }
