@@ -1,4 +1,4 @@
-import { Notice, Plugin, TAbstractFile } from 'obsidian';
+import { Notice, Plugin, TAbstractFile, TFile } from 'obsidian';
 import { t } from './i18n';
 import { LogWriter } from './logging/writer';
 import { YandexSyncSettingTab } from './settings/SettingsTab';
@@ -314,8 +314,8 @@ export default class YandexSyncPlugin extends Plugin {
         }
         const leaf = this.app.workspace.getLeaf(true);
         const file = this.app.vault.getAbstractFileByPath(path);
-        if (file && 'extension' in file) {
-            await leaf.openFile(file as any);
+        if (file instanceof TFile) {
+            await leaf.openFile(file);
         }
     }
 

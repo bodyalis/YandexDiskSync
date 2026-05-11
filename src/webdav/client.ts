@@ -1,4 +1,4 @@
-import { requestUrl, RequestUrlParam } from 'obsidian';
+import { requestUrl, RequestUrlParam, RequestUrlResponse } from 'obsidian';
 import {
     REMOTE_LOGS_SUBFOLDER,
     RETRY_BASE_DELAY_MS,
@@ -60,9 +60,8 @@ export class YandexWebDavClient {
         return WEBDAV_BASE + encodeURI(remotePath);
     }
 
-    private async send(params: RequestUrlParam, retryable = true): Promise<any> {
+    private async send(params: RequestUrlParam, retryable = true): Promise<RequestUrlResponse> {
         let attempt = 0;
-        let lastErr: any;
         const merged: RequestUrlParam = {
             ...params,
             headers: {
@@ -71,12 +70,12 @@ export class YandexWebDavClient {
                 ...(params.headers ?? {}),
             },
             throw: false,
-        } as any;
+        };
 
         while (true) {
             attempt++;
             try {
-                const res: any = await requestUrl(merged);
+                const res: RequestUrlResponse = await requestUrl(merged);
                 const status = res.status;
                 if (status >= 200 && status < 300) return res;
                 if (status === 404 || status === 405 || status === 409 || status === 412) {
@@ -90,8 +89,7 @@ export class YandexWebDavClient {
                     continue;
                 }
                 throw new WebDavError(status, mapHttpError({ status }).message);
-            } catch (e: any) {
-                lastErr = e;
+            } catch (e: unknown) {
                 if (e instanceof WebDavError) throw e;
                 // Network error -> retry
                 if (retryable && attempt <= this.maxRetries) {
@@ -140,7 +138,7 @@ export class YandexWebDavClient {
         const res = await this.send({
             url: this.url(remotePath),
             method: 'PUT',
-            body: body as any,
+            body,
         });
         // Some servers include Last-Modified in PUT response
         const lm = res?.headers?.['last-modified'] || res?.headers?.['Last-Modified'];
@@ -230,7 +228,7 @@ export class YandexWebDavClient {
             const absFolder = relFolder ? `${cleanRoot}/${relFolder}` : cleanRoot;
             const url = this.url(absFolder.endsWith('/') ? absFolder : absFolder + '/');
 
-            let res: any;
+            let res: RequestUrlResponse;
             try {
                 res = await this.send({
                     url,
@@ -334,7 +332,7 @@ export class YandexWebDavClient {
         | { ok: false; notFound?: false; message: string }
     > {
         try {
-            const res: any = await this.send(
+            const res: RequestUrlResponse = await this.send(
                 {
                     url: this.url(remoteFolder.replace(/\/+$/, '') + '/'),
                     method: 'PROPFIND',

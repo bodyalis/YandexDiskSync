@@ -28,7 +28,7 @@ export class SelectionModal extends Modal {
         contentEl.empty();
         contentEl.addClass('yds-modal');
 
-        contentEl.createEl('h2', { text: this.titleText });
+        this.titleEl.setText(this.titleText);
         contentEl.createEl('p', { text: this.description });
 
         const toolbar = contentEl.createDiv({ cls: 'yds-toolbar' });
@@ -138,7 +138,7 @@ export class ConflictModal extends Modal {
         contentEl.empty();
         contentEl.addClass('yds-modal');
 
-        contentEl.createEl('h2', { text: t('conflictModalTitle') });
+        this.titleEl.setText(t('conflictModalTitle'));
         contentEl.createEl('p', { text: t('conflictModalDesc') });
 
         const list = contentEl.createDiv({ cls: 'yds-list' });
@@ -194,7 +194,7 @@ export class ConfirmModal extends Modal {
         contentEl.empty();
         contentEl.addClass('yds-modal');
 
-        contentEl.createEl('h2', { text: this.titleText });
+        this.titleEl.setText(this.titleText);
         contentEl.createEl('p', { text: this.bodyText });
 
         const btns = contentEl.createDiv({ cls: 'yds-btns' });
@@ -239,7 +239,7 @@ export class ProgressModal extends Modal {
         const { contentEl } = this;
         contentEl.empty();
         contentEl.addClass('yds-modal');
-        contentEl.createEl('h2', { text: t('progressTitle') });
+        this.titleEl.setText(t('progressTitle'));
         this.phaseEl = contentEl.createDiv({ cls: 'yds-phase', text: t('progressPhasePlanning') });
         const barWrap = contentEl.createDiv({ cls: 'yds-bar-wrap' });
         this.barEl = barWrap.createDiv({ cls: 'yds-bar' });
