@@ -7,7 +7,7 @@ import { SyncEngine, SyncCallbacks } from './sync/SyncEngine';
 import { ConfigSyncEngine, ConfigSyncReport } from './sync/configSync';
 import { SessionReport } from './sync/SessionReport';
 import { ConflictModal, ConfirmModal, ProgressModal, SelectionModal } from './ui/modals';
-import { YandexWebDavClient } from './webdav/client';
+import { YandexClient } from './api/client';
 
 export default class YandexSyncPlugin extends Plugin {
     settings!: YandexSyncSettings;
@@ -74,7 +74,7 @@ export default class YandexSyncPlugin extends Plugin {
         // Auto-sync schedule
         this.app.workspace.onLayoutReady(() => {
             this.rescheduleAutoSync();
-            if (this.settings.syncOnStartup && this.settings.yandexToken && this.settings.yandexLogin) {
+            if (this.settings.syncOnStartup && this.settings.yandexOAuthToken) {
                 window.setTimeout(() => void this.startSync(false), 4000);
             }
         });
@@ -156,7 +156,7 @@ export default class YandexSyncPlugin extends Plugin {
         if (minutes > 0) {
             const ms = minutes * 60 * 1000;
             this.autoSyncTimer = window.setInterval(() => {
-                if (!this.isSyncing && this.settings.yandexToken && this.settings.yandexLogin) {
+                if (!this.isSyncing && this.settings.yandexOAuthToken) {
                     void this.startSync(false, /*silent*/ true);
                 }
             }, ms);
@@ -175,7 +175,7 @@ export default class YandexSyncPlugin extends Plugin {
         }
 
         if (!this.settings.syncOnFileModify) return;
-        if (!this.settings.yandexToken || !this.settings.yandexLogin) return;
+        if (!this.settings.yandexOAuthToken) return;
         const lf = this.settings.localLogFolder.replace(/^\/+|\/+$/g, '') + '/';
         if (file.path.startsWith(lf)) return;
 
@@ -193,12 +193,8 @@ export default class YandexSyncPlugin extends Plugin {
     }
 
     async testConnection(): Promise<void> {
-        if (!this.settings.yandexToken) {
+        if (!this.settings.yandexOAuthToken) {
             new Notice(t('errorNoToken'));
-            return;
-        }
-        if (!this.settings.yandexLogin) {
-            new Notice(t('errorNoLogin'));
             return;
         }
         const client = this.makeClient();
@@ -245,7 +241,7 @@ export default class YandexSyncPlugin extends Plugin {
      * mtime/hash to decide what to overwrite.
      */
     async bootstrapFromRemote(): Promise<void> {
-        if (!this.settings.yandexLogin || !this.settings.yandexToken) {
+        if (!this.settings.yandexOAuthToken) {
             new Notice(t('bootstrapNoCreds'));
             return;
         }
@@ -344,12 +340,8 @@ export default class YandexSyncPlugin extends Plugin {
             const msSinceLast = Date.now() - this.lastSyncFinishedAt;
             if (msSinceLast < YandexSyncPlugin.SYNC_COOLDOWN_MS) return;
         }
-        if (!this.settings.yandexToken) {
+        if (!this.settings.yandexOAuthToken) {
             if (!silent) new Notice(t('errorNoToken'));
-            return;
-        }
-        if (!this.settings.yandexLogin) {
-            if (!silent) new Notice(t('errorNoLogin'));
             return;
         }
 
@@ -380,7 +372,7 @@ export default class YandexSyncPlugin extends Plugin {
             },
             isCancelled: () => cancelledByUser,
             resolveConflicts: (paths) => this.resolveConflictsModal(paths),
-            confirmRemoteDelete: (paths) => this.confirmDeleteModal(paths, false),
+            confirmRemoteDelete: (paths) => this.confirmDeleteModal(paths, false) as Promise<string[] | null>,
             confirmLocalDelete: (paths) => this.confirmDeleteModal(paths, true),
             onSelfWriteLocal: (path) => {
                 this.selfWriteGuard.add(path);
@@ -491,15 +483,17 @@ export default class YandexSyncPlugin extends Plugin {
             );
         }
 
-        // If files changed during the sync, run another silent pass to pick them up.
-        // Only for real syncs (dry-run wouldn't have produced manifest changes anyway).
+        // If files changed during the sync, OR the user just restored some
+        // files in the local-delete dialog (we need a second pass to upload
+        // them), run another silent pass to pick them up. Only for real syncs.
+        const hasRestores = !!session && session.restoredLocal.length > 0;
         if (
             !dryRun &&
-            this.dirtyDuringSync &&
+            (this.dirtyDuringSync || hasRestores) &&
             session &&
             !session.cancelled &&
             !session.aborted &&
-            this.settings.syncOnFileModify
+            (this.settings.syncOnFileModify || hasRestores)
         ) {
             this.dirtyDuringSync = false;
             window.setTimeout(() => {
@@ -520,7 +514,10 @@ export default class YandexSyncPlugin extends Plugin {
         });
     }
 
-    private confirmDeleteModal(paths: string[], local: boolean): Promise<string[] | null> {
+    private confirmDeleteModal(
+        paths: string[],
+        local: boolean,
+    ): Promise<string[] | { restore: string[] } | null> {
         return new Promise((resolve) => {
             new SelectionModal(
                 this.app,
@@ -529,15 +526,23 @@ export default class YandexSyncPlugin extends Plugin {
                 paths,
                 (n) => t('confirmDeleteBtn', n),
                 true,
-                resolve,
+                (result) => {
+                    if (result === null || Array.isArray(result)) {
+                        resolve(result);
+                    } else {
+                        resolve({ restore: result.secondary });
+                    }
+                },
+                local
+                    ? { label: (n) => t('restoreSelectedBtn', n) }
+                    : undefined,
             ).open();
         });
     }
 
-    private makeClient(): YandexWebDavClient {
-        return new YandexWebDavClient(this.settings.yandexLogin, this.settings.yandexToken, {
+    private makeClient(): YandexClient {
+        return new YandexClient(this.settings.yandexOAuthToken, {
             maxRetries: this.settings.maxRetries,
-            oauthToken: this.settings.yandexOAuthToken || undefined,
         });
     }
 
