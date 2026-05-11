@@ -1,12 +1,15 @@
 import { requestUrl, RequestUrlParam, RequestUrlResponse } from 'obsidian';
 import {
     REMOTE_LOGS_SUBFOLDER,
+    REQUEST_TIMEOUT_MS,
     RETRY_BASE_DELAY_MS,
     RETRY_MAX_DELAY_MS,
     RETRYABLE_STATUSES,
     WEBDAV_BASE,
+    YANDEX_REST_API_BASE,
 } from '../constants';
 import { t } from '../i18n';
+import { errorMessage } from '../util/errors';
 
 export class WebDavError extends Error {
     constructor(public status: number, message: string, public cause?: any) {
@@ -40,17 +43,26 @@ export interface DavEntry {
 export interface ClientOptions {
     maxRetries?: number;
     onRetry?: (attempt: number, status: number, delayMs: number) => void;
+    /** Optional OAuth token (Yandex ID OAuth) for the REST upload API.
+     * Required for the fast/reliable cloud-api.yandex.net upload path; the
+     * WebDAV app password does NOT work there. */
+    oauthToken?: string;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export class YandexWebDavClient {
     private auth: string;
+    private oauth: string | null;
     private maxRetries: number;
     private onRetry?: ClientOptions['onRetry'];
+    /** Set to true if the REST upload endpoint rejected our token. After that
+     * we stop attempting it for the rest of the session and use WebDAV PUT. */
+    private restApiUnavailable = false;
 
     constructor(login: string, password: string, opts: ClientOptions = {}) {
         this.auth = 'Basic ' + btoa(`${login}:${password}`);
+        this.oauth = opts.oauthToken ? 'OAuth ' + opts.oauthToken : null;
         this.maxRetries = opts.maxRetries ?? 3;
         this.onRetry = opts.onRetry;
     }
@@ -60,7 +72,7 @@ export class YandexWebDavClient {
         return WEBDAV_BASE + encodeURI(remotePath);
     }
 
-    private async send(params: RequestUrlParam, retryable = true): Promise<RequestUrlResponse> {
+    private async send(params: RequestUrlParam, retryable = true, timeoutMs = 0): Promise<RequestUrlResponse> {
         let attempt = 0;
         const merged: RequestUrlParam = {
             ...params,
@@ -75,7 +87,18 @@ export class YandexWebDavClient {
         while (true) {
             attempt++;
             try {
-                const res: RequestUrlResponse = await requestUrl(merged);
+                const req = requestUrl(merged);
+                const res: RequestUrlResponse = timeoutMs > 0
+                    ? await Promise.race([
+                        req,
+                        new Promise<never>((_, reject) =>
+                            window.setTimeout(
+                                () => reject(new WebDavError(0, `WebDAV request timed out (${timeoutMs}ms)`)),
+                                timeoutMs,
+                            ),
+                        ),
+                    ])
+                    : await req;
                 const status = res.status;
                 if (status >= 200 && status < 300) return res;
                 if (status === 404 || status === 405 || status === 409 || status === 412) {
@@ -121,7 +144,7 @@ export class YandexWebDavClient {
             current += '/' + part;
             if (this.createdFolders.has(current)) continue;
             try {
-                await this.send({ url: this.url(current), method: 'MKCOL' }, false);
+                await this.send({ url: this.url(current), method: 'MKCOL' }, false, REQUEST_TIMEOUT_MS);
                 this.createdFolders.add(current);
             } catch (e: any) {
                 // 405 Method Not Allowed = already exists
@@ -134,16 +157,126 @@ export class YandexWebDavClient {
         }
     }
 
-    async put(remotePath: string, body: string | ArrayBuffer): Promise<{ remoteMtime: number }> {
-        const res = await this.send({
+    async put(
+        remotePath: string,
+        body: string | ArrayBuffer,
+        /** Known body size in bytes — used to compute a generous transfer timeout. */
+        sizeBytes?: number,
+    ): Promise<{ remoteMtime: number }> {
+        const bytes = sizeBytes ?? (body instanceof ArrayBuffer ? body.byteLength : body.length);
+        // 1 second per 50 KB, minimum 2 minutes. No upper cap — large files on
+        // slow connections legitimately need more time and it's better to wait
+        // than to time out and leave a half-written file on the server.
+        const timeoutMs = Math.max(120_000, Math.ceil(bytes / 50_000) * 1000);
+
+        // Use the Yandex Disk REST API for upload. The WebDAV gateway
+        // (webdav.yandex.ru) is unreliable for files larger than ~10 MB:
+        // it accepts the body but never sends back the HTTP response, causing
+        // the request to stall until our timeout fires. The cloud-api endpoint
+        // returns a pre-signed upload URL that points at proper storage and
+        // handles arbitrarily large bodies correctly.
+        // Requires an OAuth token (the WebDAV app password does NOT work on
+        // cloud-api.yandex.net). If not configured, fall through to WebDAV PUT.
+        if (this.oauth && !this.restApiUnavailable) {
+            try {
+                await this.uploadViaRestApi(remotePath, body, timeoutMs);
+                return { remoteMtime: Date.now() };
+            } catch (e) {
+                if (e instanceof WebDavError && (e.status === 401 || e.status === 403)) {
+                    // Token is missing the cloud_api:disk.write scope (or is
+                    // a WebDAV app password, which the REST API doesn't accept).
+                    // Disable REST for the rest of the session and fall back
+                    // to the WebDAV PUT below.
+                    this.restApiUnavailable = true;
+                } else {
+                    throw e;
+                }
+            }
+        }
+
+        await this.send({
             url: this.url(remotePath),
             method: 'PUT',
             body,
-        });
-        // Some servers include Last-Modified in PUT response
-        const lm = res?.headers?.['last-modified'] || res?.headers?.['Last-Modified'];
-        const remoteMtime = lm ? Date.parse(lm) : 0;
-        return { remoteMtime: isNaN(remoteMtime) ? 0 : remoteMtime };
+        }, true, timeoutMs);
+
+        // The REST upload endpoint doesn't return Last-Modified, and the
+        // WebDAV PUT response often omits it too. Fall back to "now".
+        return { remoteMtime: Date.now() };
+    }
+
+    /**
+     * Two-step upload via cloud-api.yandex.net.
+     *
+     * Step 1: GET /v1/disk/resources/upload… → returns a pre-signed `href`.
+     * Step 2: PUT the body to that href (no Authorization header — the URL
+     * itself carries the signature; an extra header makes Yandex reject it).
+     */
+    private async uploadViaRestApi(
+        remotePath: string,
+        body: string | ArrayBuffer,
+        timeoutMs: number,
+    ): Promise<void> {
+        const apiUrl =
+            `${YANDEX_REST_API_BASE}/disk/resources/upload`
+            + `?path=${encodeURIComponent('disk:' + remotePath)}`
+            + `&overwrite=true`;
+
+        const meta = await this.sendRaw({
+            url: apiUrl,
+            method: 'GET',
+            headers: { Authorization: this.oauth ?? '', Accept: 'application/json' },
+        }, REQUEST_TIMEOUT_MS);
+        if (meta.status < 200 || meta.status >= 300) {
+            throw new WebDavError(meta.status, mapHttpError({ status: meta.status }).message);
+        }
+
+        let href: string | undefined;
+        try {
+            const json = JSON.parse(meta.text) as { href?: unknown };
+            if (typeof json.href === 'string') href = json.href;
+        } catch {
+            /* fall through to the missing-href guard below */
+        }
+        if (!href) {
+            throw new WebDavError(0, 'Yandex API: missing upload href');
+        }
+
+        const upload = await this.sendRaw({
+            url: href,
+            method: 'PUT',
+            body,
+        }, timeoutMs);
+        if (upload.status < 200 || upload.status >= 300) {
+            throw new WebDavError(upload.status, mapHttpError({ status: upload.status }).message);
+        }
+    }
+
+    /**
+     * Bare HTTP request used by the REST API path. Bypasses the WebDAV-only
+     * Authorization/Accept defaults of `send()`. Applies the same timeout
+     * race used by `send()` but does not retry.
+     */
+    private async sendRaw(params: RequestUrlParam, timeoutMs: number): Promise<RequestUrlResponse> {
+        const merged: RequestUrlParam = { ...params, throw: false };
+        try {
+            const req = requestUrl(merged);
+            return timeoutMs > 0
+                ? await Promise.race<RequestUrlResponse>([
+                    req,
+                    new Promise<never>((_, reject) =>
+                        window.setTimeout(
+                            () => reject(new WebDavError(0, `Yandex API request timed out (${timeoutMs}ms)`)),
+                            timeoutMs,
+                        ),
+                    ),
+                ])
+                : await req;
+        } catch (e) {
+            if (e instanceof WebDavError) throw e;
+            const mapped = mapHttpError(e);
+            throw new WebDavError(mapped.status, mapped.message, e);
+        }
     }
 
     async getText(remotePath: string): Promise<string> {
@@ -158,7 +291,7 @@ export class YandexWebDavClient {
 
     async delete(remotePath: string): Promise<void> {
         try {
-            await this.send({ url: this.url(remotePath), method: 'DELETE' });
+            await this.send({ url: this.url(remotePath), method: 'DELETE' }, true, REQUEST_TIMEOUT_MS);
         } catch (e: any) {
             if (e instanceof WebDavError && e.status === 404) return; // already gone
             throw e;
@@ -173,7 +306,7 @@ export class YandexWebDavClient {
                 Destination: WEBDAV_BASE + encodeURI(dstPath),
                 Overwrite: overwrite ? 'T' : 'F',
             },
-        });
+        }, true, REQUEST_TIMEOUT_MS);
     }
 
     async exists(remotePath: string): Promise<boolean> {
@@ -188,6 +321,7 @@ export class YandexWebDavClient {
                         '<propfind xmlns="DAV:"><prop><resourcetype/></prop></propfind>',
                 },
                 false,
+                REQUEST_TIMEOUT_MS,
             );
             return true;
         } catch (e: any) {
@@ -242,7 +376,7 @@ export class YandexWebDavClient {
                         '<propfind xmlns="DAV:"><prop>' +
                         '<resourcetype/><getlastmodified/><getcontentlength/>' +
                         '</prop></propfind>',
-                });
+                }, true, REQUEST_TIMEOUT_MS);
             } catch (e: any) {
                 if (e instanceof WebDavError && e.status === 404) {
                     // Root missing => empty result; nested missing => just skip.

@@ -18,6 +18,9 @@ export interface YandexSyncSettings {
     // Account
     yandexLogin: string;
     yandexToken: string;
+    /** Optional OAuth token for cloud-api.yandex.net (used for fast PUT of
+     * large files). When empty, uploads go through the WebDAV gateway. */
+    yandexOAuthToken: string;
     syncFolder: string;
 
     // Sync behaviour
@@ -71,6 +74,7 @@ export interface YandexSyncSettings {
 export const DEFAULT_SETTINGS: YandexSyncSettings = {
     yandexLogin: '',
     yandexToken: '',
+    yandexOAuthToken: '',
     syncFolder: '/ObsidianBackup',
 
     twoWaySync: true,
@@ -109,28 +113,30 @@ export const DEFAULT_SETTINGS: YandexSyncSettings = {
 };
 
 /** Migrate raw data (loadData) to current shape. Mutates and returns it. */
-export function migrateSettings(raw: any): any {
+export function migrateSettings(raw: unknown): Partial<YandexSyncSettings> {
     if (!raw || typeof raw !== 'object') return {};
+    const r = raw as Record<string, unknown>;
 
     // v1 -> v2: lastSyncedFiles: string[] | Record<string, number> -> manifest: {}
-    if ('lastSyncedFiles' in raw) {
+    if ('lastSyncedFiles' in r) {
         // We can't recover hashes from old data; reset manifest. Next sync will conflict-detect.
-        raw.manifest = {};
-        delete raw.lastSyncedFiles;
+        r.manifest = {};
+        delete r.lastSyncedFiles;
     }
     // v2 (intermediate) had only mtime; replace with empty manifest if entries lack hash.
-    if (raw.manifest && typeof raw.manifest === 'object') {
-        for (const k of Object.keys(raw.manifest)) {
-            const entry = raw.manifest[k];
+    if (r.manifest && typeof r.manifest === 'object') {
+        const m = r.manifest as Record<string, unknown>;
+        for (const k of Object.keys(m)) {
+            const entry = m[k] as { hash?: unknown } | null | undefined;
             if (!entry || typeof entry !== 'object' || typeof entry.hash !== 'string') {
-                delete raw.manifest[k];
+                delete m[k];
             }
         }
     } else {
-        raw.manifest = {};
+        r.manifest = {};
     }
-    if (!raw.configManifest || typeof raw.configManifest !== 'object') {
-        raw.configManifest = {};
+    if (!r.configManifest || typeof r.configManifest !== 'object') {
+        r.configManifest = {};
     }
-    return raw;
+    return r as Partial<YandexSyncSettings>;
 }

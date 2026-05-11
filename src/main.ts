@@ -22,6 +22,11 @@ export default class YandexSyncPlugin extends Plugin {
     /** Debounced settings persistence. */
     private saveDebounceTimer: number | null = null;
     private savePending = false;
+    /** Timestamp of last completed sync. Used to enforce a cooldown so log-file
+     * writes and other post-sync vault events don't immediately trigger another sync. */
+    private lastSyncFinishedAt = 0;
+    /** Minimum ms between two automatic (non-manual) sync runs. */
+    private static readonly SYNC_COOLDOWN_MS = 30_000;
 
     async onload(): Promise<void> {
         await this.loadSettings();
@@ -173,6 +178,12 @@ export default class YandexSyncPlugin extends Plugin {
         if (!this.settings.yandexToken || !this.settings.yandexLogin) return;
         const lf = this.settings.localLogFolder.replace(/^\/+|\/+$/g, '') + '/';
         if (file.path.startsWith(lf)) return;
+
+        // Cooldown: don't start a new auto-sync if a sync just finished.
+        // This swallows the vault event from LogWriter writing the log file.
+        const msSinceLast = Date.now() - this.lastSyncFinishedAt;
+        if (msSinceLast < YandexSyncPlugin.SYNC_COOLDOWN_MS) return;
+
         if (this.modifyDebounceTimer !== null) window.clearTimeout(this.modifyDebounceTimer);
         const delay = Math.max(1, this.settings.syncOnFileModifyDelaySec) * 1000;
         this.modifyDebounceTimer = window.setTimeout(() => {
@@ -324,6 +335,15 @@ export default class YandexSyncPlugin extends Plugin {
             if (!silent) new Notice(t('noticeSyncRunning'));
             return;
         }
+        // Cooldown: silently swallow auto-triggered runs that arrive too soon
+        // after the previous sync finished. Manual syncs (silent=false) ignore
+        // it on purpose. This prevents auto-sync timers and follow-up triggers
+        // from overlapping while Yandex is still rate-limiting the previous
+        // burst of requests.
+        if (silent) {
+            const msSinceLast = Date.now() - this.lastSyncFinishedAt;
+            if (msSinceLast < YandexSyncPlugin.SYNC_COOLDOWN_MS) return;
+        }
         if (!this.settings.yandexToken) {
             if (!silent) new Notice(t('errorNoToken'));
             return;
@@ -355,7 +375,7 @@ export default class YandexSyncPlugin extends Plugin {
                 else if (u.phase === 'uploading') phaseLabel = t('progressPhaseUploading', u.file ?? '');
                 else if (u.phase === 'deleting') phaseLabel = t('progressPhaseDeleting', u.file ?? '');
                 else phaseLabel = t('progressPhaseFinishing');
-                progress.update(phaseLabel, u.current, u.total, u.file);
+                progress.update(phaseLabel, u.current, u.total, u.file, u.sizeBytes);
                 this.statusBar.setText(t('statusSyncing', u.current, u.total));
             },
             isCancelled: () => cancelledByUser,
@@ -410,6 +430,7 @@ export default class YandexSyncPlugin extends Plugin {
         } finally {
             progress.close();
             this.isSyncing = false;
+            this.lastSyncFinishedAt = Date.now();
             // Make sure manifest changes from this run are persisted before any
             // follow-up sync reads them back.
             await this.flushSettings();
@@ -483,7 +504,7 @@ export default class YandexSyncPlugin extends Plugin {
             this.dirtyDuringSync = false;
             window.setTimeout(() => {
                 if (!this.isSyncing) void this.startSync(false, true);
-            }, 1000);
+            }, YandexSyncPlugin.SYNC_COOLDOWN_MS);
         }
     }
 
@@ -516,6 +537,7 @@ export default class YandexSyncPlugin extends Plugin {
     private makeClient(): YandexWebDavClient {
         return new YandexWebDavClient(this.settings.yandexLogin, this.settings.yandexToken, {
             maxRetries: this.settings.maxRetries,
+            oauthToken: this.settings.yandexOAuthToken || undefined,
         });
     }
 

@@ -80,6 +80,10 @@ const en = {
     settingTokenName: 'Yandex app password',
     settingTokenDesc: 'Create an app password at id.yandex.ru → Security → App passwords → WebDAV. Stored locally in plain text.',
     settingTokenPlaceholder: 'Enter password',
+    settingOAuthTokenName: 'Yandex OAuth token (optional)',
+    settingOAuthTokenDesc:
+        'Recommended for large files. The WebDAV gateway hangs on uploads >10 MB; with an OAuth token the plugin uses the REST API instead. Get one at yandex.com/dev/disk/poligon/ (scopes cloud_api:disk.read + cloud_api:disk.write). Stored locally in plain text.',
+    settingOAuthTokenPlaceholder: 'OAuth token',
     settingLoginName: 'Yandex login (email)',
     settingLoginDesc: 'Your full Yandex email address.',
     settingLoginPlaceholder: 'user@yandex.ru',
@@ -275,6 +279,10 @@ const ru: typeof en = {
     settingTokenName: 'Пароль приложения Яндекс',
     settingTokenDesc: 'Создайте на id.yandex.ru → Безопасность → Пароли приложений → WebDAV. Хранится локально открытым текстом.',
     settingTokenPlaceholder: 'Введите пароль',
+    settingOAuthTokenName: 'OAuth-токен Яндекс (необязательно)',
+    settingOAuthTokenDesc:
+        'Рекомендуется для больших файлов. WebDAV-шлюз Яндекса зависает на загрузке файлов >10 МБ; с OAuth-токеном плагин использует REST API. Получить можно на yandex.ru/dev/disk/poligon/ (права cloud_api:disk.read + cloud_api:disk.write). Хранится локально открытым текстом.',
+    settingOAuthTokenPlaceholder: 'OAuth-токен',
     settingLoginName: 'Логин Яндекс (email)',
     settingLoginDesc: 'Ваш полный адрес почты.',
     settingLoginPlaceholder: 'user@yandex.ru',

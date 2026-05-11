@@ -109,6 +109,22 @@
     transition: width 0.2s ease-out;
 }
 
+@keyframes yds-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.yds-bar.yds-bar-pulse {
+    animation: yds-pulse 1.2s ease-in-out infinite;
+}
+
 .yds-file {
     font-family: var(--font-monospace);
     font-size: 0.8em;
@@ -125,6 +141,7 @@
 .yds-status:hover {
     color: var(--text-accent);
 }
+
 .yds-textarea {
     width: 100%;
     min-height: 80px;

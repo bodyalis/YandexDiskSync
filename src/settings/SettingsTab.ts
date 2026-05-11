@@ -32,6 +32,19 @@ export class YandexSyncSettingTab extends PluginSettingTab {
             });
 
         new Setting(containerEl)
+            .setName(t('settingOAuthTokenName'))
+            .setDesc(t('settingOAuthTokenDesc'))
+            .addText((text) => {
+                text.inputEl.type = 'password';
+                text.setPlaceholder(t('settingOAuthTokenPlaceholder'))
+                    .setValue(s.yandexOAuthToken)
+                    .onChange(async (v) => {
+                        s.yandexOAuthToken = v.trim();
+                        await this.plugin.saveSettings();
+                    });
+            });
+
+        new Setting(containerEl)
             .setName(t('settingLoginName'))
             .setDesc(t('settingLoginDesc'))
             .addText((text) =>

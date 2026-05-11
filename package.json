@@ -1,6 +1,6 @@
 {
     "name": "yandex-disk-sync",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Two-way sync between your Obsidian vault and Yandex Disk via WebDAV, with conflict handling, soft delete and dry-run.",
     "main": "main.js",
     "scripts": {

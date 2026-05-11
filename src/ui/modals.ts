@@ -258,14 +258,22 @@ export class ProgressModal extends Modal {
         return this.cancelled;
     }
 
-    update(phase: string, current: number, total: number, file?: string): void {
+    update(phase: string, current: number, total: number, file?: string, sizeBytes?: number): void {
         if (!this.phaseEl) return;
         this.phaseEl.setText(phase);
         const pct = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
         // Bar width is the only legitimate dynamic style: drive a CSS variable
         // that the stylesheet consumes via width: var(--yds-progress).
         this.barEl.style.setProperty('--yds-progress', pct + '%');
-        this.fileEl.setText(file ? `${current} / ${total} — ${file}` : `${current} / ${total}`);
+        // Pulse the bar while a large file is being transferred (no sub-file progress possible).
+        this.barEl.toggleClass('yds-bar-pulse', (sizeBytes ?? 0) > 1024 * 1024);
+        let label = file ?? '';
+        if (file && sizeBytes && sizeBytes > 1024) {
+            const mb = sizeBytes / (1024 * 1024);
+            const size = mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(sizeBytes / 1024)} KB`;
+            label = `${file}  (${size})`;
+        }
+        this.fileEl.setText(label ? `${current} / ${total} — ${label}` : `${current} / ${total}`);
     }
 
     onClose(): void {

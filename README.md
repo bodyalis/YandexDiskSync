@@ -11,7 +11,8 @@ Unofficial third-party plugin. Always keep an independent backup of your vault.
 - Soft delete: removed files go to a dated trash folder on Yandex Disk with configurable retention.
 - Confirmation dialogs with per-file checkboxes and search before any deletion.
 - Auto-sync on a timer, on Obsidian startup, and on file change (debounced).
-- Parallel transfers with retries on `429` / `5xx` / timeouts.
+- Sequential transfers with retries on `429` / `5xx` / timeouts (parallelism configurable).
+- Reliable uploads for large files via the Yandex Disk REST API — the WebDAV gateway alone stalls on files larger than ~10 MB.
 - Dry-run mode and Markdown sync logs inside the vault.
 - **Optional**: sync your `.obsidian/` config (settings, hotkeys, themes, plugin list) between devices.
 - **One-click bootstrap** for a new device — pull notes + config in a single step.
@@ -50,11 +51,30 @@ Open **Settings → Yandex Disk Sync** and fill in:
 |---|---|
 | Login | Your Yandex email — `user@yandex.ru` |
 | App password | The 16-character password from step 1 |
+| OAuth token *(recommended)* | See step 2.5 below. |
 | Folder on Yandex Disk | Where the vault will be mirrored, e.g. `/Obsidian` |
 | File extensions to sync | Comma-separated list. Default covers Markdown, Canvas and common image/PDF formats. |
 | Exclude paths *(optional)* | Glob patterns to skip, one per line. Example: `Drafts/**`, `**/Inbox/*.md`. |
 
 Click **Test connection**. If the folder does not exist on Yandex Disk yet, the plugin will offer to create it.
+
+### 2.5 Get an OAuth token (recommended for large files)
+
+The Yandex WebDAV gateway is unreliable for files larger than roughly 10 MB —
+it accepts the data but never returns the HTTP response, leaving the upload
+stuck. The plugin can route uploads through the official Yandex Disk REST API
+instead, which handles arbitrarily large files. The REST API requires an OAuth
+token (the WebDAV app password from step 1 will not work there).
+
+1. Open the Yandex Disk Polygon: <https://yandex.ru/dev/disk/poligon/>.
+2. Click **Get OAuth token** and authorize the app. The required scopes are
+   `cloud_api:disk.read` and `cloud_api:disk.write`.
+3. Copy the token and paste it into the **Yandex OAuth token** field in the
+   plugin settings.
+
+If the field is empty the plugin keeps using WebDAV PUT for everything (the
+legacy behaviour). If the token is invalid or rejected (401 / 403), the plugin
+automatically falls back to WebDAV for the rest of the session.
 
 ### 3. First sync
 

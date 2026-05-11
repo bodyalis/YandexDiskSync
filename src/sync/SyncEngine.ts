@@ -1,5 +1,5 @@
 import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian';
-import { BINARY_EXTENSIONS, MTIME_TOLERANCE_MS, REMOTE_LOGS_SUBFOLDER } from '../constants';
+import { BINARY_EXTENSIONS, LARGE_FILE_CACHE_THRESHOLD, MTIME_TOLERANCE_MS, REMOTE_LOGS_SUBFOLDER } from '../constants';
 import { t } from '../i18n';
 import { ManifestEntry, YandexSyncSettings, ConflictStrategy } from '../settings/types';
 import { DavEntry, WebDavError, YandexWebDavClient } from '../webdav/client';
@@ -15,6 +15,8 @@ export interface ProgressUpdate {
     current: number;
     total: number;
     file?: string;
+    /** File size in bytes — provided for uploading/downloading phases so the UI can show it. */
+    sizeBytes?: number;
 }
 
 export interface SyncCallbacks {
@@ -113,6 +115,14 @@ export class SyncEngine {
                     );
                 } catch (e: any) {
                     console.error('PROPFIND failed:', e);
+                    // 429 = rate limited: Yandex will likely throttle subsequent
+                    // PUT/GET requests too. Abort now instead of hanging for minutes.
+                    if (e instanceof WebDavError && e.status === 429) {
+                        session.aborted = true;
+                        session.otherErrors.push({ reason: 'Rate limited (429) — try again in a minute' });
+                        new Notice(t('errRateLimit'));
+                        return session;
+                    }
                     session.otherErrors.push({ reason: `PROPFIND failed: ${e?.message ?? e}` });
                 }
             }
@@ -206,8 +216,8 @@ export class SyncEngine {
                     if (d === 'prefer-remote') {
                         // Treat as a remote-newer: download instead of upload
                         if (!remoteOnly.includes(c.file.path) && remote.has(c.file.path)) {
-                            // Add to download list explicitly via reclassification trick
-                            (c as any).kind = 'remote-newer';
+                            // Reclassify so the download phase below picks it up.
+                            c.kind = 'remote-newer';
                             continue;
                         }
                     }
@@ -235,20 +245,30 @@ export class SyncEngine {
                     if (folder && folder !== '/' && !dryRun) {
                         await this.client.ensureFolder(`${syncFolder}/${folder}`);
                     }
+                    // Show "uploading X" BEFORE the transfer starts (not after),
+                    // so the user knows which file is being sent right now.
                     cb.onProgress?.({
                         phase: 'uploading',
                         current: ++uploadCounter,
                         total: uploadTotal.v,
                         file: c.file.path,
+                        sizeBytes: c.file.stat.size,
                     });
                     if (dryRun) {
                         session.uploaded.push(c.file.path);
                         return;
                     }
                     try {
-                        const { content, hash, isBinary } = await this.readWithHash(c);
+                        const { content, isBinary } = await this.readContent(c.file);
                         const remotePath = `${syncFolder}/${c.file.path}`;
-                        const { remoteMtime } = await this.client.put(remotePath, content);
+                        const { remoteMtime } = await this.client.put(
+                            remotePath,
+                            content,
+                            c.file.stat.size,
+                        );
+                        // Hash AFTER PUT — not needed for the transfer itself,
+                        // only stored in the manifest.
+                        const hash = c.localHash ?? await sha256(content);
                         session.uploaded.push(c.file.path);
                         this.settings.manifest[c.file.path] = {
                             hash,
@@ -256,7 +276,15 @@ export class SyncEngine {
                             size: c.file.stat.size,
                             remoteMtime: remoteMtime || Date.now(),
                         };
-                        // Mark for awareness; binary already uploaded
+                        // Update progress to show the file as "done" — clears the
+                        // pulsing animation and removes the size label.
+                        cb.onProgress?.({
+                            phase: 'uploading',
+                            current: uploadCounter,
+                            total: uploadTotal.v,
+                            file: c.file.path,
+                            sizeBytes: 0,
+                        });
                         void isBinary;
                     } catch (err: any) {
                         const msg = err?.message ?? String(err);
@@ -277,7 +305,7 @@ export class SyncEngine {
             // b) remote-newer (existing locally, server has newer)
             if (this.settings.twoWaySync) {
                 for (const c of classified) {
-                    if ((c as any).kind === 'remote-newer') {
+                    if (c.kind === 'remote-newer') {
                         toDownload.push({ path: c.file.path, entry: remote.get(c.file.path) });
                     }
                 }
@@ -315,10 +343,18 @@ export class SyncEngine {
                 session.cancelled = true;
                 return session;
             }
+            // Clear the last-file label so the bar doesn't appear frozen
+            // while folder sync and deletions run below.
+            if (uploadTasks.length > 0) {
+                cb.onProgress?.({ phase: 'finishing', current: 1, total: 1 });
+            }
             await runWithConcurrency(downloadTasks, this.settings.maxConcurrency, cancelled);
             if (cancelled()) {
                 session.cancelled = true;
                 return session;
+            }
+            if (downloadTasks.length > 0) {
+                cb.onProgress?.({ phase: 'finishing', current: 1, total: 1 });
             }
 
             // 8b. Folder sync (preserve empty folders in both directions).
@@ -374,23 +410,31 @@ export class SyncEngine {
                     const rawCandidates = classified
                         .filter((c) => c.kind === 'remote-deleted')
                         .map((c) => c.file.path);
-                    // Verify each one with a per-file PROPFIND. Yandex WebDAV listings
-                    // can omit recently-PUT files (eventual consistency); without this
-                    // check we would offer to delete files that actually exist.
-                    for (const p of rawCandidates) {
-                        if (cancelled()) break;
-                        let stillThere = false;
-                        try {
-                            stillThere = await this.client.exists(`${syncFolder}/${p}`);
-                        } catch {
-                            // Network error during verification: be conservative, skip.
-                            stillThere = true;
+                    // Verify each one with a per-file PROPFIND concurrently.
+                    // Yandex WebDAV listings can omit recently-PUT files (eventual
+                    // consistency); without this check we would offer to delete files
+                    // that actually exist.
+                    const verifyTasks = rawCandidates.map(
+                        (p) => async (): Promise<{ p: string; stillThere: boolean }> => {
+                            try {
+                                return { p, stillThere: await this.client.exists(`${syncFolder}/${p}`) };
+                            } catch {
+                                // Network error: be conservative, treat as still present.
+                                return { p, stillThere: true };
+                            }
+                        },
+                    );
+                    const verifyResults = await runWithConcurrency(
+                        verifyTasks,
+                        this.settings.maxConcurrency,
+                        cancelled,
+                    );
+                    for (const r of verifyResults) {
+                        if (r.status === 'fulfilled') {
+                            if (r.value.stillThere) session.skipped.push(r.value.p);
+                            else candidateLocalDelete.push(r.value.p);
                         }
-                        if (stillThere) {
-                            session.skipped.push(p);
-                        } else {
-                            candidateLocalDelete.push(p);
-                        }
+                        // rejected = conservative skip (tasks catch internally so this won't happen)
                     }
                 }
 
@@ -474,7 +518,11 @@ export class SyncEngine {
             }
 
             cb.onProgress?.({ phase: 'finishing', current: 1, total: 1 });
-            if (!dryRun) await this.saveSettings();
+            if (!dryRun) {
+                // saveSettings() is debounced — await it directly so the
+                // progress modal doesn't close before the manifest is written.
+                await this.saveSettings();
+            }
         } catch (e: any) {
             console.error('Sync engine fatal:', e);
             session.aborted = true;
@@ -493,56 +541,50 @@ export class SyncEngine {
         const manifestEntry = this.settings.manifest[file.path];
         const remoteEntry = remote.get(file.path);
 
-        // Cheap pre-check: same size + same mtime as in manifest -> almost certainly unchanged
-        let needHash = true;
-        let localHash: string | undefined;
-        if (
-            manifestEntry &&
-            manifestEntry.size === file.stat.size &&
-            Math.abs(manifestEntry.localMtime - file.stat.mtime) < MTIME_TOLERANCE_MS
-        ) {
-            needHash = false;
-            localHash = manifestEntry.hash;
+        // No manifest entry: kind is determined purely by remote presence — reading
+        // or hashing the file is completely unnecessary here. The upload task will
+        // call readWithHash() when it actually needs the content.
+        if (!manifestEntry) {
+            return { file, kind: remoteEntry ? 'conflict' : 'new' };
         }
+
+        // Fast path: size + mtime match the last-known values → treat as unchanged
+        // without touching the file at all.
+        const sizeMatch = manifestEntry.size === file.stat.size;
+        const mtimeMatch = Math.abs(manifestEntry.localMtime - file.stat.mtime) < MTIME_TOLERANCE_MS;
+
+        let localHash: string = manifestEntry.hash;
         let content: string | ArrayBuffer | undefined;
         let isBinary = false;
-        if (needHash) {
+
+        if (!sizeMatch || !mtimeMatch) {
+            // File metadata changed — read and hash to confirm.
             const r = await this.readContent(file);
-            content = r.content;
             isBinary = r.isBinary;
-            localHash = await sha256(content);
-        }
-
-        const localChanged = !manifestEntry || manifestEntry.hash !== localHash;
-
-        // No manifest entry yet
-        if (!manifestEntry) {
-            if (!remoteEntry) {
-                return { file, kind: 'new', localHash, content, isBinary };
+            localHash = await sha256(r.content);
+            // Cache content only for small files; large files stay out of memory
+            // until the upload task runs.
+            if (file.stat.size <= LARGE_FILE_CACHE_THRESHOLD) {
+                content = r.content;
             }
-            // exists on remote but we never tracked it -> conflict
-            return { file, kind: 'conflict', localHash, content, isBinary };
         }
 
-        // Manifest exists
+        const localChanged = manifestEntry.hash !== localHash;
+
         if (!remoteEntry) {
             // Remote was deleted on another device.
-            if (!localChanged) {
-                // Truly stale local copy -> candidate for local deletion
-                return { file, kind: 'remote-deleted', localHash, content, isBinary };
-            }
-            // Local also changed -> safer to re-upload (treat as local-newer)
+            if (!localChanged) return { file, kind: 'remote-deleted', localHash };
+            // Local changed too — safer to re-upload.
             return { file, kind: 'local-newer', localHash, content, isBinary };
         }
 
-        // Both manifest & remote entries exist.
         const remoteChanged =
             remoteEntry.mtime > 0 &&
             remoteEntry.mtime > manifestEntry.remoteMtime + MTIME_TOLERANCE_MS;
 
-        if (!localChanged && !remoteChanged) return { file, kind: 'unchanged', localHash, content, isBinary };
+        if (!localChanged && !remoteChanged) return { file, kind: 'unchanged', localHash };
         if (localChanged && !remoteChanged) return { file, kind: 'local-newer', localHash, content, isBinary };
-        if (!localChanged && remoteChanged) return { file, kind: 'remote-newer', localHash, content, isBinary };
+        if (!localChanged && remoteChanged) return { file, kind: 'remote-newer', localHash };
         return { file, kind: 'conflict', localHash, content, isBinary };
     }
 
