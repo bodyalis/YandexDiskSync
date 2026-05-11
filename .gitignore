@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+*.js.map
+
+# Local plugin data (contains secrets!)
+data.json
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+
+# Release artifacts
+*.zip
+release/
+
+# Logs
+*.log

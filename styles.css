@@ -1,0 +1,133 @@
+/* Yandex Disk Sync — UI styles */
+
+.yds-modal h2 {
+    margin-top: 0;
+}
+
+.yds-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.yds-search {
+    flex: 1 1 200px;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.yds-toolbtn {
+    padding: 4px 10px;
+    cursor: pointer;
+}
+
+.yds-count {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.yds-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-bottom: 12px;
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    background: var(--background-secondary);
+}
+
+.yds-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    border-bottom: 1px solid var(--background-modifier-border-hover);
+    word-break: break-all;
+}
+
+.yds-row:last-child {
+    border-bottom: none;
+}
+
+.yds-row-static {
+    display: block;
+}
+
+.yds-row input[type="checkbox"] {
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.yds-path {
+    cursor: pointer;
+    flex: 1;
+    user-select: none;
+}
+
+.yds-hidden {
+    display: none !important;
+}
+
+.yds-btns {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.yds-btns-wrap {
+    flex-wrap: wrap;
+}
+
+.yds-phase {
+    margin-bottom: 8px;
+    color: var(--text-muted);
+    font-size: 0.95em;
+}
+
+.yds-bar-wrap {
+    width: 100%;
+    height: 8px;
+    background: var(--background-modifier-border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.yds-bar {
+    height: 100%;
+    width: var(--yds-progress, 0%);
+    background: var(--interactive-accent);
+    transition: width 0.2s ease-out;
+}
+
+.yds-file {
+    font-family: var(--font-monospace);
+    font-size: 0.8em;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    word-break: break-all;
+    min-height: 1.2em;
+}
+
+.yds-status {
+    cursor: pointer;
+}
+
+.yds-status:hover {
+    color: var(--text-accent);
+}
+.yds-textarea {
+    width: 100%;
+    min-height: 80px;
+    font-family: var(--font-monospace);
+    font-size: 0.9em;
+}
