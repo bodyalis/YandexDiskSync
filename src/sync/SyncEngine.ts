@@ -59,7 +59,7 @@ export class SyncEngine {
         private saveSettings: () => Promise<void>,
     ) { }
 
-    async run(callbacks: SyncCallbacks, dryRun = false): Promise<SessionReport> {
+    async run(callbacks: SyncCallbacks, dryRun = false, downloadOnly = false): Promise<SessionReport> {
         this.cb = callbacks;
         const session = newSession(dryRun);
         const cb = callbacks;
@@ -98,16 +98,19 @@ export class SyncEngine {
 
             // 2. Remote listing (needed for two-way sync, conflict detection, reconcile)
             let remote = new Map<string, DavEntry>();
+            const remoteFolders = new Set<string>();
             const needRemote =
                 this.settings.twoWaySync ||
                 this.settings.enablePropfindReconcile ||
                 this.settings.conflictStrategy !== 'overwrite';
             if (needRemote) {
                 try {
-                    remote = await this.client.listFiles(syncFolder, exts, [
-                        REMOTE_LOGS_SUBFOLDER,
-                        trashSub,
-                    ]);
+                    remote = await this.client.listFiles(
+                        syncFolder,
+                        exts,
+                        [REMOTE_LOGS_SUBFOLDER, trashSub],
+                        remoteFolders,
+                    );
                 } catch (e: any) {
                     console.error('PROPFIND failed:', e);
                     session.otherErrors.push({ reason: `PROPFIND failed: ${e?.message ?? e}` });
@@ -187,6 +190,11 @@ export class SyncEngine {
                 }
                 if (c.kind === 'remote-deleted') {
                     // Will be handled in deletion phase (after verification).
+                    continue;
+                }
+                if (downloadOnly) {
+                    // Bootstrap mode: never push local state to the remote.
+                    session.skipped.push(c.file.path);
                     continue;
                 }
 
@@ -313,8 +321,31 @@ export class SyncEngine {
                 return session;
             }
 
+            // 8b. Folder sync (preserve empty folders in both directions).
+            //     Files that were just uploaded/downloaded already implicitly created
+            //     their parent folders; this step exists for folders that contain no
+            //     tracked files at all.
+            try {
+                await this.syncEmptyFolders({
+                    syncFolder,
+                    trashSub,
+                    logFolderPrefix,
+                    remoteFolders,
+                    isExcluded,
+                    downloadOnly,
+                    dryRun,
+                    cancelled,
+                });
+            } catch (e: any) {
+                console.warn('Empty-folder sync failed:', e);
+            }
+            if (cancelled()) {
+                session.cancelled = true;
+                return session;
+            }
+
             // 9. Deletion phase
-            if (this.settings.enableDelete) {
+            if (this.settings.enableDelete && !downloadOnly) {
                 // Remote deletions = files in manifest but no longer local AND
                 //                    files on remote (reconcile) that are not local
                 const fromManifest = Object.keys(this.settings.manifest).filter(
@@ -740,6 +771,83 @@ export class SyncEngine {
                 await this.app.vault.createFolder(cur);
             } catch (e: any) {
                 if (!/already exists/i.test(String(e?.message ?? e))) throw e;
+            }
+        }
+    }
+
+    /**
+     * Mirror non-trivial folders (including empty ones) in both directions.
+     * - Local-only folders \u2192 created remotely (skipped in downloadOnly).
+     * - Remote-only folders \u2192 created locally.
+     * Excluded paths, the trash subfolder and the local log folder are skipped.
+     * Folder *deletions* are intentionally not handled here \u2014 file-deletion
+     * cleans up on its own and folder-deletion is risky (could nuke a folder
+     * the user just created on the other device).
+     */
+    private async syncEmptyFolders(opts: {
+        syncFolder: string;
+        trashSub: string;
+        logFolderPrefix: string;
+        remoteFolders: Set<string>;
+        isExcluded: (p: string) => boolean;
+        downloadOnly: boolean;
+        dryRun: boolean;
+        cancelled: () => boolean;
+    }): Promise<void> {
+        const { syncFolder, trashSub, logFolderPrefix, remoteFolders, isExcluded,
+            downloadOnly, dryRun, cancelled } = opts;
+
+        // Collect all local folders (relative vault paths, no leading slash).
+        const localFolders = new Set<string>();
+        const walk = (folder: TFolder) => {
+            for (const child of folder.children) {
+                if (child instanceof TFolder) {
+                    localFolders.add(child.path);
+                    walk(child);
+                }
+            }
+        };
+        const root = this.app.vault.getRoot();
+        if (root) walk(root);
+
+        const skip = (rel: string): boolean => {
+            if (!rel) return true;
+            if (rel.startsWith(logFolderPrefix)) return true;
+            // logFolderPrefix has trailing '/'; also handle exact match
+            const logFolder = logFolderPrefix.replace(/\/+$/, '');
+            if (logFolder && rel === logFolder) return true;
+            if (rel === trashSub || rel.startsWith(`${trashSub}/`)) return true;
+            // isExcluded operates on file globs; folder paths usually won't
+            // match, but respect it when they do (e.g. trailing /** patterns).
+            if (isExcluded(rel) || isExcluded(`${rel}/`)) return true;
+            return false;
+        };
+
+        // 1. Push local-only folders to remote.
+        if (!downloadOnly) {
+            for (const rel of localFolders) {
+                if (cancelled()) return;
+                if (skip(rel)) continue;
+                if (remoteFolders.has(rel)) continue;
+                if (dryRun) continue;
+                try {
+                    await this.client.ensureFolder(`${syncFolder}/${rel}`);
+                } catch (e: any) {
+                    console.warn('ensureFolder (remote) failed for', rel, e);
+                }
+            }
+        }
+
+        // 2. Pull remote-only folders to local.
+        for (const rel of remoteFolders) {
+            if (cancelled()) return;
+            if (skip(rel)) continue;
+            if (localFolders.has(rel)) continue;
+            if (dryRun) continue;
+            try {
+                await this.ensureLocalFolder(rel);
+            } catch (e: any) {
+                console.warn('ensureLocalFolder failed for', rel, e);
             }
         }
     }

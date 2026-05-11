@@ -7,6 +7,7 @@ const en = {
     commandSyncDryRun: 'Sync (dry run)',
     commandOpenLastLog: 'Open last sync log',
     commandTestConnection: 'Test connection',
+    commandBootstrap: 'Bootstrap vault from Yandex Disk',
 
     // Notices
     errorNoToken: 'Please provide a Yandex app password in settings.',
@@ -39,6 +40,31 @@ const en = {
     confirmCreateFolderDesc: 'The folder "{0}" does not exist on Yandex Disk. Create it now?',
     confirmCreateFolderBtn: 'Create folder',
 
+    // Config sync
+    noticeConfigSynced: 'Obsidian config: ↑{0} ↓{1} ✕{2}',
+    progressPhaseSyncingConfig: 'Syncing config: {0}',
+    confirmEnableConfigSyncTitle: 'Sync Obsidian config?',
+    confirmEnableConfigSyncDesc:
+        'This will sync your .obsidian/ folder (settings, hotkeys, themes, snippets, plugin lists) between devices via Yandex Disk.\n\nAlways excluded: workspace*, cache, this plugin\u2019s own folder.\nRecommended excludes (toggle below): plugin data.json (may contain API keys), compiled plugin files, hotkeys.\n\nUse with care — a broken setting on one machine will propagate to others. Continue?',
+    confirmEnableConfigSyncBtn: 'Enable',
+
+    // Bootstrap (first-run on a new device)
+    bootstrapBtnName: 'Bootstrap from Yandex Disk',
+    bootstrapBtnDesc:
+        'For a fresh install on a new device. Downloads all notes AND your Obsidian config (settings, hotkeys, themes, plugin list) from Yandex Disk in one step. After it finishes, restart Obsidian.',
+    bootstrapBtn: 'Bootstrap now',
+    bootstrapConfirmTitle: 'Bootstrap from Yandex Disk?',
+    bootstrapConfirmDesc:
+        'This will download EVERYTHING from "{0}" — notes and the .obsidian/ folder — into this vault, then ask you to restart Obsidian.\n\nUse this only on a fresh / empty vault. Existing local files with the same names will be OVERWRITTEN if the remote copy differs.\n\nContinue?',
+    bootstrapConfirmBtn: 'Bootstrap',
+    bootstrapStarting: 'Bootstrapping vault from Yandex Disk…',
+    bootstrapDoneTitle: 'Bootstrap complete',
+    bootstrapDoneDesc:
+        'Notes downloaded: {0}\nConfig files downloaded: {1}\n\nObsidian must be RESTARTED for the new settings, hotkeys and plugin list to take effect.\n\nAfter restart, you may need to install missing community plugins manually (Settings → Community plugins → Browse).',
+    bootstrapDoneBtn: 'OK, I\u2019ll restart',
+    bootstrapNoCreds: 'Please enter your Yandex login and app password first.',
+    bootstrapFolderMissing: 'Remote folder "{0}" does not exist on Yandex Disk — nothing to bootstrap from.',
+
     // Settings — sections
     settingAccountHeader: 'Account',
     settingSyncHeader: 'Sync behaviour',
@@ -69,6 +95,18 @@ const en = {
     settingExcludeGlobsDesc:
         'One pattern per line. Matches vault-relative paths. Use * for one segment, ** for any depth. Example: Drafts/**, **/Inbox/*.md. Lines starting with # are ignored.',
     settingExcludeGlobsPlaceholder: 'Drafts/**\n**/Inbox/*.md',
+    settingObsidianConfigHeader: 'Obsidian config sync (experimental)',
+    settingSyncObsidianConfigName: 'Sync Obsidian config (.obsidian/)',
+    settingSyncObsidianConfigDesc:
+        'Sync settings, hotkeys, themes, snippets and the list of installed plugins between devices. workspace*, cache and this plugin\u2019s own folder are always skipped. Files are stored on Yandex Disk under .obsidian-config/.',
+    settingExcludePluginDataName: 'Exclude plugin data (data.json)',
+    settingExcludePluginDataDesc:
+        'Recommended. Plugin data files often contain API keys, passwords or per-machine state.',
+    settingExcludePluginBinariesName: 'Exclude compiled plugins',
+    settingExcludePluginBinariesDesc:
+        'Recommended. Skip main.js, styles.css, manifest.json — these are re-installed automatically from the catalog when you enable a plugin from community-plugins.json.',
+    settingExcludeHotkeysName: 'Exclude hotkeys',
+    settingExcludeHotkeysDesc: 'Recommended on mixed Windows/macOS setups: hotkeys differ (Ctrl vs Cmd).',
     settingEnableDeleteName: 'Enable deletion',
     settingEnableDeleteDesc: 'Delete on Yandex Disk what was deleted locally (and vice-versa with two-way sync).',
     settingConfirmDeleteName: 'Confirm before deletion',
@@ -169,6 +207,7 @@ const ru: typeof en = {
     commandSyncDryRun: 'Синхронизация (предпросмотр)',
     commandOpenLastLog: 'Открыть последний лог',
     commandTestConnection: 'Проверить подключение',
+    commandBootstrap: 'Развернуть Vault из Яндекс.Диска',
 
     errorNoToken: 'Укажите пароль приложения Яндекса в настройках.',
     errorNoLogin: 'Укажите логин Яндекса в настройках.',
@@ -200,6 +239,29 @@ const ru: typeof en = {
     confirmCreateFolderDesc: 'Папка «{0}» отсутствует на Яндекс.Диске. Создать её?',
     confirmCreateFolderBtn: 'Создать папку',
 
+    noticeConfigSynced: 'Конфиг Obsidian: ↑{0} ↓{1} ✕{2}',
+    progressPhaseSyncingConfig: 'Синхронизация конфига: {0}',
+    confirmEnableConfigSyncTitle: 'Синхронизировать конфиг Obsidian?',
+    confirmEnableConfigSyncDesc:
+        'Папка .obsidian/ (настройки, хоткеи, темы, сниппеты, список плагинов) будет синхронизироваться между устройствами.\n\nВсегда исключаются: workspace*, cache, папка этого плагина.\nРекомендуемые исключения (переключатели ниже): data.json плагинов (в них могут быть API-ключи), собранные файлы плагинов, хоткеи.\n\nОсторожно — сломанная настройка разъедется на все машины. Продолжить?',
+    confirmEnableConfigSyncBtn: 'Включить',
+
+    bootstrapBtnName: 'Развернуть из Яндекс.Диска',
+    bootstrapBtnDesc:
+        'Для нового устройства. Скачивает все заметки И конфиг Obsidian (настройки, хоткеи, темы, список плагинов) с Я.Диска за один шаг. По завершению попросит перезапустить Obsidian.',
+    bootstrapBtn: 'Развернуть',
+    bootstrapConfirmTitle: 'Развернуть из Я.Диска?',
+    bootstrapConfirmDesc:
+        'Будет скачано ВСЁ из «{0}» — заметки и папка .obsidian/ — в этот vault, затем нужно будет перезапустить Obsidian.\n\nИспользуйте только на пустом или новом vault. Существующие файлы с теми же именами будут ПЕРЕЗАПИСАНЫ, если версия на сервере другая.\n\nПродолжить?',
+    bootstrapConfirmBtn: 'Развернуть',
+    bootstrapStarting: 'Разворачиваю Vault с Я.Диска…',
+    bootstrapDoneTitle: 'Развёртывание завершено',
+    bootstrapDoneDesc:
+        'Скачано заметок: {0}\nСкачано файлов конфига: {1}\n\nНужно ПЕРЕЗАПУСТИТЬ Obsidian, чтобы новые настройки, хоткеи и список плагинов применились.\n\nПосле перезапуска может потребоваться вручную доустановить недостающие community-плагины (Settings → Community plugins → Browse).',
+    bootstrapDoneBtn: 'ОК, перезапущу',
+    bootstrapNoCreds: 'Сначала введите логин и пароль приложения Яндекса.',
+    bootstrapFolderMissing: 'Удалённая папка «{0}» не существует на Я.Диске — откуда разворачивать?',
+
     settingAccountHeader: 'Аккаунт',
     settingSyncHeader: 'Поведение синхронизации',
     settingDeletionHeader: 'Удаление',
@@ -228,6 +290,18 @@ const ru: typeof en = {
     settingExcludeGlobsDesc:
         'Один шаблон на строку. Сравнивается с путём от корня vault. * — один уровень, ** — любая глубина. Примеры: Drafts/**, **/Inbox/*.md. Строки с # в начале игнорируются.',
     settingExcludeGlobsPlaceholder: 'Drafts/**\n**/Inbox/*.md',
+    settingObsidianConfigHeader: 'Синхронизация конфига Obsidian (эксперимент)',
+    settingSyncObsidianConfigName: 'Синхронизировать конфиг Obsidian (.obsidian/)',
+    settingSyncObsidianConfigDesc:
+        'Синхронизировать настройки, хоткеи, темы, сниппеты и список установленных плагинов между устройствами. workspace*, cache и папка этого плагина всегда пропускаются. Файлы хранятся на Я.Диске в .obsidian-config/.',
+    settingExcludePluginDataName: 'Исключить data.json плагинов',
+    settingExcludePluginDataDesc:
+        'Рекомендуется. В data.json часто лежат API-ключи, пароли или состояние, зависящее от машины.',
+    settingExcludePluginBinariesName: 'Исключить собранные плагины',
+    settingExcludePluginBinariesDesc:
+        'Рекомендуется. Пропускать main.js, styles.css, manifest.json — они переустановятся из каталога при включении плагина из community-plugins.json.',
+    settingExcludeHotkeysName: 'Исключить хоткеи',
+    settingExcludeHotkeysDesc: 'Рекомендуется, если используете Windows + macOS: хоткеи различаются (Ctrl vs Cmd).',
     settingEnableDeleteName: 'Удалять файлы',
     settingEnableDeleteDesc: 'Удалять на Я.Диске то, что удалено локально (и наоборот при двусторонней синхронизации).',
     settingConfirmDeleteName: 'Подтверждение перед удалением',

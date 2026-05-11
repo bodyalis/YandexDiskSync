@@ -13,6 +13,8 @@ Unofficial third-party plugin. Always keep an independent backup of your vault.
 - Auto-sync on a timer, on Obsidian startup, and on file change (debounced).
 - Parallel transfers with retries on `429` / `5xx` / timeouts.
 - Dry-run mode and Markdown sync logs inside the vault.
+- **Optional**: sync your `.obsidian/` config (settings, hotkeys, themes, plugin list) between devices.
+- **One-click bootstrap** for a new device — pull notes + config in a single step.
 - Works on desktop and mobile.
 - English and Russian UI.
 
@@ -75,6 +77,42 @@ Click **Test connection**. If the folder does not exist on Yandex Disk yet, the 
 | Sync (dry run) | Compute the plan and write a log without changing any file. |
 | Open last sync log | Open the most recent log file. |
 | Test connection | Verify credentials and folder access. |
+| Bootstrap vault from Yandex Disk | Pull all notes and the `.obsidian/` config from Yandex Disk in one step. Use on a fresh device. |
+
+## Sync Obsidian config (.obsidian/)
+
+The plugin can optionally sync your `.obsidian/` folder — settings, hotkeys, themes, snippets and the list of installed community plugins — between devices through the same Yandex Disk folder. Stored on the server under `<sync folder>/.obsidian-config/`.
+
+Always excluded (hard-coded, cannot be enabled):
+
+- `workspace`, `workspace.json`, `workspace-mobile.json` — change on every click, would constantly conflict.
+- `cache`, `.DS_Store`, `Thumbs.db`.
+- This plugin's own folder (`plugins/yandex-disk-sync/`) — your manifest and credentials must stay device-local.
+
+Recommended optional excludes (on by default):
+
+- **Plugin data (`data.json`)** — often contains API keys, OAuth tokens, or per-machine state.
+- **Compiled plugin files** (`main.js`, `styles.css`, `manifest.json`) — re-installed automatically when you enable a plugin from `community-plugins.json`.
+
+Optional excludes (off by default):
+
+- **Hotkeys** — recommended on mixed Windows + macOS setups (Ctrl vs Cmd differ).
+
+Conflict policy for config files: **last write wins by mtime** (no UI prompt). Deletions are mirrored. Restoring deleted config files from trash is not supported.
+
+> Use with care: a broken setting on one machine will propagate to every device on the next sync. The first time you enable this in Settings, you'll see a warning.
+
+## Setting up a new device
+
+1. Install Obsidian → create an empty vault → close it.
+2. Open Obsidian → install **Yandex Disk Sync** from Community plugins → enable.
+3. **Settings → Yandex Disk Sync** → enter login, app password and folder.
+4. Toggle **Sync Obsidian config** → confirm the warning dialog.
+5. Click **Bootstrap from Yandex Disk** (or run the command). All notes and your `.obsidian/` config are downloaded.
+6. **Quit and restart Obsidian** so it re-reads the freshly downloaded settings.
+7. Obsidian will warn about plugins listed in `community-plugins.json` that are not installed locally. Install missing ones from **Community plugins → Browse** and restart once more.
+
+> Credentials (login + app password) are never synced — you must enter them on every new device.
 
 ## How conflicts work
 
