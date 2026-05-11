@@ -46,9 +46,9 @@ export class ConfigSyncEngine {
         private settings: YandexSyncSettings,
         private client: YandexWebDavClient,
         private saveSettings: () => Promise<void>,
-    ) {}
+    ) { }
 
-    async run(callbacks: ConfigSyncCallbacks = {}, dryRun = false): Promise<ConfigSyncReport> {
+    async run(callbacks: ConfigSyncCallbacks = {}, dryRun = false, downloadOnly = false): Promise<ConfigSyncReport> {
         const report: ConfigSyncReport = {
             uploaded: [],
             downloaded: [],
@@ -157,6 +157,20 @@ export class ConfigSyncEngine {
                         else downloadList.push(vaultPath);
                     }
                 }
+            }
+
+            if (downloadOnly) {
+                // Bootstrap mode: pure pull from remote.
+                // Files queued for upload or for any kind of deletion are intentionally
+                // skipped \u2014 we don't touch the remote at all and we don't remove anything
+                // local. Whatever is on remote is added/overwritten locally; everything
+                // else is left alone for the user to decide later.
+                for (const p of uploadList) report.skipped.push(p);
+                for (const p of remoteDeleteList) report.skipped.push(p);
+                for (const p of localDeleteList) report.skipped.push(p);
+                uploadList.length = 0;
+                remoteDeleteList.length = 0;
+                localDeleteList.length = 0;
             }
 
             const totalOps = uploadList.length + downloadList.length + remoteDeleteList.length + localDeleteList.length;

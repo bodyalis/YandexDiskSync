@@ -279,7 +279,7 @@ export default class YandexSyncPlugin extends Plugin {
                 };
 
                 try {
-                    await this.startSync(false, /*silent*/ false);
+                    await this.startSync(false, /*silent*/ false, /*downloadOnly*/ true);
                 } finally {
                     this.settings.syncObsidianConfig = prevConfigSync;
                     this.bootstrapResultSink = null;
@@ -319,7 +319,7 @@ export default class YandexSyncPlugin extends Plugin {
         }
     }
 
-    async startSync(dryRun: boolean, silent = false): Promise<void> {
+    async startSync(dryRun: boolean, silent = false, downloadOnly = false): Promise<void> {
         if (this.isSyncing) {
             if (!silent) new Notice(t('noticeSyncRunning'));
             return;
@@ -377,7 +377,7 @@ export default class YandexSyncPlugin extends Plugin {
         let session: SessionReport | null = null;
         let configReport: ConfigSyncReport | null = null;
         try {
-            session = await engine.run(callbacks, dryRun);
+            session = await engine.run(callbacks, dryRun, downloadOnly);
             // Run config sync after main note sync, only if enabled and main sync wasn't aborted/cancelled.
             if (
                 this.settings.syncObsidianConfig &&
@@ -404,6 +404,7 @@ export default class YandexSyncPlugin extends Plugin {
                         },
                     },
                     dryRun,
+                    downloadOnly,
                 );
             }
         } finally {
