@@ -58,6 +58,11 @@ export default class YandexSyncPlugin extends Plugin {
             name: t('commandTestConnection'),
             callback: () => void this.testConnection(),
         });
+        this.addCommand({
+            id: 'yds-bootstrap',
+            name: t('commandBootstrap'),
+            callback: () => void this.bootstrapFromRemote(),
+        });
 
         this.addSettingTab(new YandexSyncSettingTab(this.app, this));
 
@@ -221,6 +226,85 @@ export default class YandexSyncPlugin extends Plugin {
         new Notice(t('noticeTestFail', res.message));
     }
 
+    /**
+     * One-shot helper for fresh installs on a new device. Verifies connection,
+     * temporarily forces config-sync ON, runs a regular sync, then restores
+     * the previous config-sync setting and shows a "please restart Obsidian"
+     * dialog. Existing local files are NOT wiped \u2014 sync engine still uses
+     * mtime/hash to decide what to overwrite.
+     */
+    async bootstrapFromRemote(): Promise<void> {
+        if (!this.settings.yandexLogin || !this.settings.yandexToken) {
+            new Notice(t('bootstrapNoCreds'));
+            return;
+        }
+        const folder = this.normalizeRemote(this.settings.syncFolder);
+        const client = this.makeClient();
+
+        // Verify the remote folder is there \u2014 nothing to bootstrap from otherwise.
+        const probe = await client.testConnection(folder);
+        if (!probe.ok) {
+            if (probe.notFound) {
+                new Notice(t('bootstrapFolderMissing', folder));
+            } else {
+                new Notice(t('noticeTestFail', probe.message));
+            }
+            return;
+        }
+
+        // Confirm with user (destructive-style \u2014 will overwrite differing files).
+        new ConfirmModal(
+            this.app,
+            t('bootstrapConfirmTitle'),
+            t('bootstrapConfirmDesc', folder),
+            t('bootstrapConfirmBtn'),
+            true,
+            async (ok) => {
+                if (!ok) return;
+                new Notice(t('bootstrapStarting'));
+
+                // Force config-sync ON for this run; restore afterwards regardless of outcome.
+                const prevConfigSync = this.settings.syncObsidianConfig;
+                this.settings.syncObsidianConfig = true;
+
+                // Snapshot counters to compute "downloaded during bootstrap".
+                // We track via a one-shot wrapper that captures the report from startSync.
+                const before = {
+                    notes: 0,
+                    config: 0,
+                };
+                this.bootstrapResultSink = (notes, config) => {
+                    before.notes = notes;
+                    before.config = config;
+                };
+
+                try {
+                    await this.startSync(false, /*silent*/ false);
+                } finally {
+                    this.settings.syncObsidianConfig = prevConfigSync;
+                    this.bootstrapResultSink = null;
+                    await this.flushSettings();
+                }
+
+                // Show the restart prompt regardless of file counts \u2014 the user
+                // explicitly opted in and might want to restart anyway.
+                new ConfirmModal(
+                    this.app,
+                    t('bootstrapDoneTitle'),
+                    t('bootstrapDoneDesc', before.notes, before.config),
+                    t('bootstrapDoneBtn'),
+                    false,
+                    () => {
+                        /* nothing to do \u2014 user restarts Obsidian themselves */
+                    },
+                ).open();
+            },
+        ).open();
+    }
+
+    /** Set by bootstrapFromRemote() so startSync() can report file counts back. */
+    private bootstrapResultSink: ((notes: number, config: number) => void) | null = null;
+
     async openLastLog(): Promise<void> {
         const writer = new LogWriter(this.app, this.settings, this.makeClient());
         const path = writer.findLatestLog();
@@ -375,6 +459,14 @@ export default class YandexSyncPlugin extends Plugin {
             if (up + dn + del > 0) {
                 new Notice(t('noticeConfigSynced', up, dn, del));
             }
+        }
+
+        // Bootstrap mode: report download counts back to caller.
+        if (this.bootstrapResultSink) {
+            this.bootstrapResultSink(
+                session?.downloaded.length ?? 0,
+                configReport?.downloaded.length ?? 0,
+            );
         }
 
         // If files changed during the sync, run another silent pass to pick them up.

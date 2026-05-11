@@ -7,6 +7,7 @@ const en = {
     commandSyncDryRun: 'Sync (dry run)',
     commandOpenLastLog: 'Open last sync log',
     commandTestConnection: 'Test connection',
+    commandBootstrap: 'Bootstrap vault from Yandex Disk',
 
     // Notices
     errorNoToken: 'Please provide a Yandex app password in settings.',
@@ -46,6 +47,23 @@ const en = {
     confirmEnableConfigSyncDesc:
         'This will sync your .obsidian/ folder (settings, hotkeys, themes, snippets, plugin lists) between devices via Yandex Disk.\n\nAlways excluded: workspace*, cache, this plugin\u2019s own folder.\nRecommended excludes (toggle below): plugin data.json (may contain API keys), compiled plugin files, hotkeys.\n\nUse with care — a broken setting on one machine will propagate to others. Continue?',
     confirmEnableConfigSyncBtn: 'Enable',
+
+    // Bootstrap (first-run on a new device)
+    bootstrapBtnName: 'Bootstrap from Yandex Disk',
+    bootstrapBtnDesc:
+        'For a fresh install on a new device. Downloads all notes AND your Obsidian config (settings, hotkeys, themes, plugin list) from Yandex Disk in one step. After it finishes, restart Obsidian.',
+    bootstrapBtn: 'Bootstrap now',
+    bootstrapConfirmTitle: 'Bootstrap from Yandex Disk?',
+    bootstrapConfirmDesc:
+        'This will download EVERYTHING from "{0}" — notes and the .obsidian/ folder — into this vault, then ask you to restart Obsidian.\n\nUse this only on a fresh / empty vault. Existing local files with the same names will be OVERWRITTEN if the remote copy differs.\n\nContinue?',
+    bootstrapConfirmBtn: 'Bootstrap',
+    bootstrapStarting: 'Bootstrapping vault from Yandex Disk…',
+    bootstrapDoneTitle: 'Bootstrap complete',
+    bootstrapDoneDesc:
+        'Notes downloaded: {0}\nConfig files downloaded: {1}\n\nObsidian must be RESTARTED for the new settings, hotkeys and plugin list to take effect.\n\nAfter restart, you may need to install missing community plugins manually (Settings → Community plugins → Browse).',
+    bootstrapDoneBtn: 'OK, I\u2019ll restart',
+    bootstrapNoCreds: 'Please enter your Yandex login and app password first.',
+    bootstrapFolderMissing: 'Remote folder "{0}" does not exist on Yandex Disk — nothing to bootstrap from.',
 
     // Settings — sections
     settingAccountHeader: 'Account',
@@ -189,6 +207,7 @@ const ru: typeof en = {
     commandSyncDryRun: 'Синхронизация (предпросмотр)',
     commandOpenLastLog: 'Открыть последний лог',
     commandTestConnection: 'Проверить подключение',
+    commandBootstrap: 'Развернуть Vault из Яндекс.Диска',
 
     errorNoToken: 'Укажите пароль приложения Яндекса в настройках.',
     errorNoLogin: 'Укажите логин Яндекса в настройках.',
@@ -226,6 +245,22 @@ const ru: typeof en = {
     confirmEnableConfigSyncDesc:
         'Папка .obsidian/ (настройки, хоткеи, темы, сниппеты, список плагинов) будет синхронизироваться между устройствами.\n\nВсегда исключаются: workspace*, cache, папка этого плагина.\nРекомендуемые исключения (переключатели ниже): data.json плагинов (в них могут быть API-ключи), собранные файлы плагинов, хоткеи.\n\nОсторожно — сломанная настройка разъедется на все машины. Продолжить?',
     confirmEnableConfigSyncBtn: 'Включить',
+
+    bootstrapBtnName: 'Развернуть из Яндекс.Диска',
+    bootstrapBtnDesc:
+        'Для нового устройства. Скачивает все заметки И конфиг Obsidian (настройки, хоткеи, темы, список плагинов) с Я.Диска за один шаг. По завершению попросит перезапустить Obsidian.',
+    bootstrapBtn: 'Развернуть',
+    bootstrapConfirmTitle: 'Развернуть из Я.Диска?',
+    bootstrapConfirmDesc:
+        'Будет скачано ВСЁ из «{0}» — заметки и папка .obsidian/ — в этот vault, затем нужно будет перезапустить Obsidian.\n\nИспользуйте только на пустом или новом vault. Существующие файлы с теми же именами будут ПЕРЕЗАПИСАНЫ, если версия на сервере другая.\n\nПродолжить?',
+    bootstrapConfirmBtn: 'Развернуть',
+    bootstrapStarting: 'Разворачиваю Vault с Я.Диска…',
+    bootstrapDoneTitle: 'Развёртывание завершено',
+    bootstrapDoneDesc:
+        'Скачано заметок: {0}\nСкачано файлов конфига: {1}\n\nНужно ПЕРЕЗАПУСТИТЬ Obsidian, чтобы новые настройки, хоткеи и список плагинов применились.\n\nПосле перезапуска может потребоваться вручную доустановить недостающие community-плагины (Settings → Community plugins → Browse).',
+    bootstrapDoneBtn: 'ОК, перезапущу',
+    bootstrapNoCreds: 'Сначала введите логин и пароль приложения Яндекса.',
+    bootstrapFolderMissing: 'Удалённая папка «{0}» не существует на Я.Диске — откуда разворачивать?',
 
     settingAccountHeader: 'Аккаунт',
     settingSyncHeader: 'Поведение синхронизации',

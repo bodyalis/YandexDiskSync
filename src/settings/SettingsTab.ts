@@ -78,6 +78,23 @@ export class YandexSyncSettingTab extends PluginSettingTab {
                 }),
         );
 
+        new Setting(containerEl)
+            .setName(t('bootstrapBtnName'))
+            .setDesc(t('bootstrapBtnDesc'))
+            .addButton((btn) =>
+                btn
+                    .setButtonText(t('bootstrapBtn'))
+                    .setWarning()
+                    .onClick(async () => {
+                        btn.setDisabled(true);
+                        try {
+                            await this.plugin.bootstrapFromRemote();
+                        } finally {
+                            btn.setDisabled(false);
+                        }
+                    }),
+            );
+
         // ==== Sync behaviour ====
         new Setting(containerEl).setName(t('settingSyncHeader')).setHeading();
 
