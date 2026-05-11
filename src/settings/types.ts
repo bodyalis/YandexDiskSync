@@ -16,10 +16,13 @@ export interface ManifestEntry {
 
 export interface YandexSyncSettings {
     // Account
-    yandexLogin: string;
-    yandexToken: string;
-    /** Optional OAuth token for cloud-api.yandex.net (used for fast PUT of
-     * large files). When empty, uploads go through the WebDAV gateway. */
+    /**
+     * OAuth token for cloud-api.yandex.net.
+     *
+     * Required since 1.3.0 — the legacy WebDAV gateway has been retired.
+     * Issue one at https://yandex.ru/dev/disk/poligon/ with the
+     * `cloud_api:disk.read` and `cloud_api:disk.write` scopes.
+     */
     yandexOAuthToken: string;
     syncFolder: string;
 
@@ -72,8 +75,6 @@ export interface YandexSyncSettings {
 }
 
 export const DEFAULT_SETTINGS: YandexSyncSettings = {
-    yandexLogin: '',
-    yandexToken: '',
     yandexOAuthToken: '',
     syncFolder: '/ObsidianBackup',
 
@@ -116,6 +117,11 @@ export const DEFAULT_SETTINGS: YandexSyncSettings = {
 export function migrateSettings(raw: unknown): Partial<YandexSyncSettings> {
     if (!raw || typeof raw !== 'object') return {};
     const r = raw as Record<string, unknown>;
+
+    // 1.3.0: WebDAV gateway dropped. The Yandex login + WebDAV app password
+    // are no longer used; remove them so they don't sit around in data.json.
+    delete r.yandexLogin;
+    delete r.yandexToken;
 
     // v1 -> v2: lastSyncedFiles: string[] | Record<string, number> -> manifest: {}
     if ('lastSyncedFiles' in r) {

@@ -1,8 +1,12 @@
 // Common constants
-export const WEBDAV_BASE = 'https://webdav.yandex.ru';
-/** Yandex Disk REST API. Used for uploads — the WebDAV gateway stalls on
- * files larger than ~10 MB. Requires an OAuth token with the
- * `cloud_api:disk.write` scope (a WebDAV app password is NOT accepted). */
+/**
+ * Yandex Disk REST API base URL. The plugin used to also speak WebDAV via
+ * webdav.yandex.ru, but that gateway stalls on PUTs over ~10 MB and forces
+ * XML parsing, so the entire transport was migrated to REST in 1.3.0.
+ *
+ * Requires an OAuth token with `cloud_api:disk.read` and
+ * `cloud_api:disk.write` scopes.
+ */
 export const YANDEX_REST_API_BASE = 'https://cloud-api.yandex.net/v1';
 export const REMOTE_LOGS_SUBFOLDER = 'Logs';
 export const DEFAULT_REMOTE_TRASH = '.trash';
@@ -15,7 +19,7 @@ export const RETRY_BASE_DELAY_MS = 600;
 export const RETRY_MAX_DELAY_MS = 8000;
 export const RETRYABLE_STATUSES = new Set<number>([408, 423, 425, 429, 500, 502, 503, 504]);
 
-// Timeout for WebDAV control operations (PROPFIND, MKCOL, DELETE, MOVE).
+// Timeout for control operations (list/exists/move/delete/mkdir).
 // Data operations (PUT, GET) are excluded — large files need unlimited transfer time.
 export const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -25,9 +29,10 @@ export const REQUEST_TIMEOUT_MS = 30_000;
 export const LARGE_FILE_CACHE_THRESHOLD = 4 * 1024 * 1024; // 4 MB
 
 // Default concurrency for upload/download phases.
-// 1 = fully sequential — safest for Yandex WebDAV which aggressively rate-limits
-// parallel requests. Users can increase this in settings at their own risk.
-export const DEFAULT_CONCURRENCY = 1;
+// REST API tolerates 3–4 parallel requests well; we use 2 as a conservative
+// default that still gives ~2x throughput over sequential without tripping
+// the 429 rate limiter on bursts.
+export const DEFAULT_CONCURRENCY = 2;
 
 // Subfolder on Yandex Disk that mirrors the local .obsidian/ config directory.
 // Stored separately from notes so it never appears in the user's normal vault listing

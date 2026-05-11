@@ -8,7 +8,7 @@ import {
 } from '../constants';
 import { t } from '../i18n';
 import { ManifestEntry, YandexSyncSettings } from '../settings/types';
-import { DavEntry, WebDavError, YandexWebDavClient } from '../webdav/client';
+import { RemoteEntry, YandexApiError, YandexClient } from '../api/client';
 import { sha256 } from './hash';
 import { runWithConcurrency } from './concurrency';
 
@@ -44,7 +44,7 @@ export class ConfigSyncEngine {
     constructor(
         private app: App,
         private settings: YandexSyncSettings,
-        private client: YandexWebDavClient,
+        private client: YandexClient,
         private saveSettings: () => Promise<void>,
     ) { }
 
@@ -77,12 +77,12 @@ export class ConfigSyncEngine {
             }
 
             // 3. List remote
-            let remoteFiles = new Map<string, DavEntry>();
+            let remoteFiles = new Map<string, RemoteEntry>();
             try {
-                remoteFiles = await this.client.listFiles(remoteRoot, null, []);
+                remoteFiles = await this.client.list(remoteRoot, null, []);
             } catch (e: any) {
-                if (!(e instanceof WebDavError && e.status === 404)) {
-                    console.warn('Config-sync remote PROPFIND failed:', e);
+                if (!(e instanceof YandexApiError && e.status === 404)) {
+                    console.warn('Config-sync remote listing failed:', e);
                     report.errors.push({ path: remoteRoot, reason: e?.message ?? String(e) });
                 }
             }
@@ -371,7 +371,7 @@ export class ConfigSyncEngine {
     private async downloadOne(
         vaultPath: string,
         syncFolder: string,
-        entry: DavEntry | undefined,
+        entry: RemoteEntry | undefined,
     ): Promise<void> {
         const adapter = this.app.vault.adapter;
         const remoteRel = vaultPath.substring(CONFIG_ROOT.length + 1);

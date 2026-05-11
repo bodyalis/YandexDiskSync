@@ -4,8 +4,18 @@ import { ConflictAction } from '../sync/SessionReport';
 
 /**
  * Generic confirmation modal with searchable, checkbox-selectable list.
- * Resolves with the array of selected paths, or null if cancelled.
+ *
+ * Resolves with one of:
+ *  - the array of selected paths (primary action),
+ *  - `{ secondary: string[] }` if a secondary action was clicked,
+ *  - `null` if cancelled / closed without confirming.
  */
+export type SelectionResult = string[] | { secondary: string[] } | null;
+
+export interface SecondaryAction {
+    label: (count: number) => string;
+}
+
 export class SelectionModal extends Modal {
     private selected: Set<string>;
     private resolved = false;
@@ -17,7 +27,8 @@ export class SelectionModal extends Modal {
         private paths: string[],
         private confirmLabel: (count: number) => string,
         private destructive: boolean,
-        private onResolve: (selected: string[] | null) => void,
+        private onResolve: (result: SelectionResult) => void,
+        private secondary?: SecondaryAction,
     ) {
         super(app);
         this.selected = new Set(paths);
@@ -69,6 +80,16 @@ export class SelectionModal extends Modal {
                 this.onResolve(null);
                 this.close();
             });
+        let secondaryBtn: ButtonComponent | null = null;
+        if (this.secondary) {
+            secondaryBtn = new ButtonComponent(btns)
+                .setButtonText(this.secondary.label(this.selected.size))
+                .onClick(() => {
+                    this.resolved = true;
+                    this.onResolve({ secondary: Array.from(this.selected) });
+                    this.close();
+                });
+        }
         const confirmBtn = new ButtonComponent(btns)
             .setButtonText(this.confirmLabel(this.selected.size))
             .onClick(() => {
@@ -82,6 +103,10 @@ export class SelectionModal extends Modal {
             countLabel.setText(`${this.selected.size} / ${this.paths.length}`);
             confirmBtn.setButtonText(this.confirmLabel(this.selected.size));
             confirmBtn.setDisabled(this.selected.size === 0);
+            if (secondaryBtn && this.secondary) {
+                secondaryBtn.setButtonText(this.secondary.label(this.selected.size));
+                secondaryBtn.setDisabled(this.selected.size === 0);
+            }
         };
 
         const applyFilter = (): void => {

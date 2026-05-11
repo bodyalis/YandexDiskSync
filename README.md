@@ -1,6 +1,6 @@
 # Yandex Disk Sync
 
-Two-way sync between your Obsidian vault and Yandex Disk over WebDAV.
+Two-way sync between your Obsidian vault and Yandex Disk over the official Disk REST API.
 
 Unofficial third-party plugin. Always keep an independent backup of your vault.
 
@@ -10,9 +10,10 @@ Unofficial third-party plugin. Always keep an independent backup of your vault.
 - Conflict resolution: ask, skip, prefer local, prefer remote, or keep both.
 - Soft delete: removed files go to a dated trash folder on Yandex Disk with configurable retention.
 - Confirmation dialogs with per-file checkboxes and search before any deletion.
+  - **Restore** button on the local-delete dialog re-uploads files instead of removing them.
 - Auto-sync on a timer, on Obsidian startup, and on file change (debounced).
-- Sequential transfers with retries on `429` / `5xx` / timeouts (parallelism configurable).
-- Reliable uploads for large files via the Yandex Disk REST API — the WebDAV gateway alone stalls on files larger than ~10 MB.
+- Reliable transfers powered by `cloud-api.yandex.net` — no WebDAV, no XML, no large-file stalls.
+- Configurable parallelism with retries on `429` / `5xx` / timeouts.
 - Dry-run mode and Markdown sync logs inside the vault.
 - **Optional**: sync your `.obsidian/` config (settings, hotkeys, themes, plugin list) between devices.
 - **One-click bootstrap** for a new device — pull notes + config in a single step.
@@ -33,15 +34,17 @@ Once approved, find it in **Settings → Community plugins → Browse → "Yande
 
 ## Setup
 
-### 1. Get a Yandex app password
+### 1. Get a Yandex OAuth token
 
-Yandex requires a separate password for WebDAV access — your main account password will not work.
+The plugin authenticates with the Yandex Disk REST API using an OAuth token.
+The legacy WebDAV app password is **not** accepted by this API.
 
-1. Open <https://id.yandex.ru/security/app-passwords>.
-2. Create a new password, choose category **WebDAV / Файлы**, give it a name (e.g. `Obsidian`).
-3. Copy the generated 16-character password. You will not see it again.
+1. Open the Yandex Disk Polygon: <https://yandex.ru/dev/disk/poligon/>.
+2. Click **Get OAuth token** and authorize the app.
+3. Make sure both `cloud_api:disk.read` and `cloud_api:disk.write` scopes are granted.
+4. Copy the token — you will not see it again.
 
-> The app password can be revoked at any time from the same page without changing your main account password.
+The token can be revoked at any time from <https://id.yandex.ru/security/applications-and-services> without changing your account password.
 
 ### 2. Configure the plugin
 
@@ -49,32 +52,12 @@ Open **Settings → Yandex Disk Sync** and fill in:
 
 | Field | Value |
 |---|---|
-| Login | Your Yandex email — `user@yandex.ru` |
-| App password | The 16-character password from step 1 |
-| OAuth token *(recommended)* | See step 2.5 below. |
+| Yandex OAuth token | The token from step 1 |
 | Folder on Yandex Disk | Where the vault will be mirrored, e.g. `/Obsidian` |
 | File extensions to sync | Comma-separated list. Default covers Markdown, Canvas and common image/PDF formats. |
 | Exclude paths *(optional)* | Glob patterns to skip, one per line. Example: `Drafts/**`, `**/Inbox/*.md`. |
 
 Click **Test connection**. If the folder does not exist on Yandex Disk yet, the plugin will offer to create it.
-
-### 2.5 Get an OAuth token (recommended for large files)
-
-The Yandex WebDAV gateway is unreliable for files larger than roughly 10 MB —
-it accepts the data but never returns the HTTP response, leaving the upload
-stuck. The plugin can route uploads through the official Yandex Disk REST API
-instead, which handles arbitrarily large files. The REST API requires an OAuth
-token (the WebDAV app password from step 1 will not work there).
-
-1. Open the Yandex Disk Polygon: <https://yandex.ru/dev/disk/poligon/>.
-2. Click **Get OAuth token** and authorize the app. The required scopes are
-   `cloud_api:disk.read` and `cloud_api:disk.write`.
-3. Copy the token and paste it into the **Yandex OAuth token** field in the
-   plugin settings.
-
-If the field is empty the plugin keeps using WebDAV PUT for everything (the
-legacy behaviour). If the token is invalid or rejected (401 / 403), the plugin
-automatically falls back to WebDAV for the rest of the session.
 
 ### 3. First sync
 
@@ -126,13 +109,13 @@ Conflict policy for config files: **last write wins by mtime** (no UI prompt). D
 
 1. Install Obsidian → create an empty vault → close it.
 2. Open Obsidian → install **Yandex Disk Sync** from Community plugins → enable.
-3. **Settings → Yandex Disk Sync** → enter login, app password and folder.
+3. **Settings → Yandex Disk Sync** → paste your OAuth token and pick the sync folder.
 4. Toggle **Sync Obsidian config** → confirm the warning dialog.
 5. Click **Bootstrap from Yandex Disk** (or run the command). All notes and your `.obsidian/` config are downloaded.
 6. **Quit and restart Obsidian** so it re-reads the freshly downloaded settings.
 7. Obsidian will warn about plugins listed in `community-plugins.json` that are not installed locally. Install missing ones from **Community plugins → Browse** and restart once more.
 
-> Credentials (login + app password) are never synced — you must enter them on every new device.
+> The OAuth token is never synced — you must paste it on every new device.
 
 ## How conflicts work
 
@@ -155,8 +138,8 @@ When **Soft delete** is enabled, deletions on either side are mirrored into `<sy
 
 ## Security
 
-- All traffic goes to `https://webdav.yandex.ru` over HTTPS via Obsidian's `requestUrl`.
-- Credentials are stored in plain text in `<vault>/.obsidian/plugins/yandex-disk-sync/data.json` (Obsidian has no secure key store). Always use an app password so you can revoke access without changing your main password.
+- All traffic goes to `https://cloud-api.yandex.net` over HTTPS via Obsidian's `requestUrl`.
+- The OAuth token is stored in plain text in `<vault>/.obsidian/plugins/yandex-disk-sync/data.json` (Obsidian has no secure key store). Always use a token you can revoke from id.yandex.ru rather than your account password.
 - No telemetry, no third-party network code.
 
 ## Building from source

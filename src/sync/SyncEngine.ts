@@ -2,13 +2,16 @@ import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian';
 import { BINARY_EXTENSIONS, LARGE_FILE_CACHE_THRESHOLD, MTIME_TOLERANCE_MS, REMOTE_LOGS_SUBFOLDER } from '../constants';
 import { t } from '../i18n';
 import { ManifestEntry, YandexSyncSettings, ConflictStrategy } from '../settings/types';
-import { DavEntry, WebDavError, YandexWebDavClient } from '../webdav/client';
+import { RemoteEntry, YandexApiError, YandexClient } from '../api/client';
 import { sha256 } from './hash';
 import { runWithConcurrency } from './concurrency';
 import { compileGlobs } from './glob';
 import { ConflictAction, SessionReport, newSession } from './SessionReport';
 
 export type SyncPhase = 'planning' | 'downloading' | 'uploading' | 'deleting' | 'finishing';
+
+/** Result of the local-delete confirmation dialog. */
+export type LocalDeleteDecision = string[] | { restore: string[] } | null;
 
 export interface ProgressUpdate {
     phase: SyncPhase;
@@ -25,8 +28,13 @@ export interface SyncCallbacks {
     resolveConflicts?: (paths: string[]) => Promise<Map<string, ConflictAction>>;
     /** Confirm remote deletions. Returns selected subset (or null = cancel all). */
     confirmRemoteDelete?: (paths: string[]) => Promise<string[] | null>;
-    /** Confirm local deletions (files removed on the other side). */
-    confirmLocalDelete?: (paths: string[]) => Promise<string[] | null>;
+    /**
+     * Confirm local deletions (files removed on the other side). Caller may
+     * either pick a subset to delete (`string[]`), request that some files be
+     * restored (re-uploaded next sync) by returning `{ restore: string[] }`,
+     * or cancel the whole prompt by returning `null`.
+     */
+    confirmLocalDelete?: (paths: string[]) => Promise<LocalDeleteDecision>;
     /** Called every retry attempt for a request. */
     onRetry?: (attempt: number, status: number, delayMs: number) => void;
     /** Polled regularly; if true, sync stops gracefully. */
@@ -57,7 +65,7 @@ export class SyncEngine {
     constructor(
         private app: App,
         private settings: YandexSyncSettings,
-        private client: YandexWebDavClient,
+        private client: YandexClient,
         private saveSettings: () => Promise<void>,
     ) { }
 
@@ -99,7 +107,7 @@ export class SyncEngine {
             const localPaths = new Set(localFiles.map((f) => f.path));
 
             // 2. Remote listing (needed for two-way sync, conflict detection, reconcile)
-            let remote = new Map<string, DavEntry>();
+            let remote = new Map<string, RemoteEntry>();
             const remoteFolders = new Set<string>();
             const needRemote =
                 this.settings.twoWaySync ||
@@ -107,23 +115,23 @@ export class SyncEngine {
                 this.settings.conflictStrategy !== 'overwrite';
             if (needRemote) {
                 try {
-                    remote = await this.client.listFiles(
+                    remote = await this.client.list(
                         syncFolder,
                         exts,
                         [REMOTE_LOGS_SUBFOLDER, trashSub],
                         remoteFolders,
                     );
                 } catch (e: any) {
-                    console.error('PROPFIND failed:', e);
+                    console.error('Remote listing failed:', e);
                     // 429 = rate limited: Yandex will likely throttle subsequent
-                    // PUT/GET requests too. Abort now instead of hanging for minutes.
-                    if (e instanceof WebDavError && e.status === 429) {
+                    // requests too. Abort now instead of hanging for minutes.
+                    if (e instanceof YandexApiError && e.status === 429) {
                         session.aborted = true;
                         session.otherErrors.push({ reason: 'Rate limited (429) — try again in a minute' });
                         new Notice(t('errRateLimit'));
                         return session;
                     }
-                    session.otherErrors.push({ reason: `PROPFIND failed: ${e?.message ?? e}` });
+                    session.otherErrors.push({ reason: `Remote listing failed: ${e?.message ?? e}` });
                 }
             }
 
@@ -185,117 +193,21 @@ export class SyncEngine {
             }
 
             // 6. Build upload tasks
-            const uploadTasks: Array<() => Promise<void>> = [];
-            let uploadCounter = 0;
-            const uploadTotal = { v: 0 };
-
-            for (const c of classified) {
-                if (c.kind === 'unchanged') {
-                    session.skipped.push(c.file.path);
-                    continue;
-                }
-                if (c.kind === 'remote-newer') {
-                    // Will be handled in download phase
-                    continue;
-                }
-                if (c.kind === 'remote-deleted') {
-                    // Will be handled in deletion phase (after verification).
-                    continue;
-                }
-                if (downloadOnly) {
-                    // Bootstrap mode: never push local state to the remote.
-                    session.skipped.push(c.file.path);
-                    continue;
-                }
-
-                let action: ConflictAction = 'overwrite';
-                if (c.kind === 'conflict') {
-                    const d = conflictDecisions.get(c.file.path) ?? 'skip';
-                    session.conflicts.push({ path: c.file.path, action: d });
-                    if (d === 'skip') continue;
-                    if (d === 'prefer-remote') {
-                        // Treat as a remote-newer: download instead of upload
-                        if (!remoteOnly.includes(c.file.path) && remote.has(c.file.path)) {
-                            // Reclassify so the download phase below picks it up.
-                            c.kind = 'remote-newer';
-                            continue;
-                        }
-                    }
-                    action = d as ConflictAction;
-                    if (action === 'keep-both') {
-                        if (!dryRun) {
-                            try {
-                                await this.saveRemoteAsConflictCopy(c.file, syncFolder);
-                            } catch (e: any) {
-                                session.uploadFailed.push({
-                                    path: c.file.path,
-                                    reason: `keep-both download failed: ${e?.message ?? e}`,
-                                });
-                                continue;
-                            }
-                        }
-                        action = 'overwrite';
-                    }
-                }
-
-                uploadTotal.v++;
-                uploadTasks.push(async () => {
-                    if (cancelled()) return;
-                    const folder = c.file.parent?.path;
-                    if (folder && folder !== '/' && !dryRun) {
-                        await this.client.ensureFolder(`${syncFolder}/${folder}`);
-                    }
-                    // Show "uploading X" BEFORE the transfer starts (not after),
-                    // so the user knows which file is being sent right now.
-                    cb.onProgress?.({
-                        phase: 'uploading',
-                        current: ++uploadCounter,
-                        total: uploadTotal.v,
-                        file: c.file.path,
-                        sizeBytes: c.file.stat.size,
-                    });
-                    if (dryRun) {
-                        session.uploaded.push(c.file.path);
-                        return;
-                    }
-                    try {
-                        const { content, isBinary } = await this.readContent(c.file);
-                        const remotePath = `${syncFolder}/${c.file.path}`;
-                        const { remoteMtime } = await this.client.put(
-                            remotePath,
-                            content,
-                            c.file.stat.size,
-                        );
-                        // Hash AFTER PUT — not needed for the transfer itself,
-                        // only stored in the manifest.
-                        const hash = c.localHash ?? await sha256(content);
-                        session.uploaded.push(c.file.path);
-                        this.settings.manifest[c.file.path] = {
-                            hash,
-                            localMtime: c.file.stat.mtime,
-                            size: c.file.stat.size,
-                            remoteMtime: remoteMtime || Date.now(),
-                        };
-                        // Update progress to show the file as "done" — clears the
-                        // pulsing animation and removes the size label.
-                        cb.onProgress?.({
-                            phase: 'uploading',
-                            current: uploadCounter,
-                            total: uploadTotal.v,
-                            file: c.file.path,
-                            sizeBytes: 0,
-                        });
-                        void isBinary;
-                    } catch (err: any) {
-                        const msg = err?.message ?? String(err);
-                        session.uploadFailed.push({ path: c.file.path, reason: msg });
-                        new Notice(t('errorSpecific', c.file.name, msg));
-                    }
-                });
-            }
+            const uploadTasks = await this.buildUploadTasks({
+                classified,
+                conflictDecisions,
+                remoteOnly,
+                remote,
+                session,
+                cb,
+                cancelled,
+                syncFolder,
+                dryRun,
+                downloadOnly,
+            });
 
             // 7. Build download tasks (two-way sync)
-            const toDownload: Array<{ path: string; entry?: DavEntry }> = [];
+            const toDownload: Array<{ path: string; entry?: RemoteEntry }> = [];
             // a) remote-only NEW files
             for (const p of remoteNewToDownload) {
                 if (!p.startsWith(`${trashSub}/`)) {
@@ -310,32 +222,10 @@ export class SyncEngine {
                     }
                 }
             }
-
-            const downloadTasks: Array<() => Promise<void>> = [];
-            let dlCounter = 0;
-            const dlTotal = toDownload.length;
-            for (const { path: p, entry } of toDownload) {
-                downloadTasks.push(async () => {
-                    if (cancelled()) return;
-                    cb.onProgress?.({
-                        phase: 'downloading',
-                        current: ++dlCounter,
-                        total: dlTotal,
-                        file: p,
-                    });
-                    if (dryRun) {
-                        session.downloaded.push(p);
-                        return;
-                    }
-                    try {
-                        await this.downloadOne(p, entry, syncFolder);
-                        session.downloaded.push(p);
-                    } catch (err: any) {
-                        const msg = err?.message ?? String(err);
-                        session.downloadFailed.push({ path: p, reason: msg });
-                    }
-                });
-            }
+            const downloadTasks = this.buildDownloadTasks(
+                toDownload,
+                { session, cb, cancelled, syncFolder, dryRun },
+            );
 
             // 8. Execute uploads + downloads with concurrency
             await runWithConcurrency(uploadTasks, this.settings.maxConcurrency, cancelled);
@@ -382,139 +272,19 @@ export class SyncEngine {
 
             // 9. Deletion phase
             if (this.settings.enableDelete && !downloadOnly) {
-                // Remote deletions = files in manifest but no longer local AND
-                //                    files on remote (reconcile) that are not local
-                const fromManifest = Object.keys(this.settings.manifest).filter(
-                    (p) => !localPaths.has(p),
-                );
-                const fromReconcile = this.settings.enablePropfindReconcile
-                    ? [...remote.keys()].filter((p) => !localPaths.has(p))
-                    : [];
-                // If two-way sync is enabled, files-deleted-on-remote are LOCAL deletions, not remote.
-                let candidateRemoteDelete = unique([...fromManifest, ...fromReconcile])
-                    .filter((p) => !p.startsWith(logFolderPrefix))
-                    .filter((p) => !p.startsWith(`${trashSub}/`));
-
-                // Always remove anything we just queued for download — those are
-                // not deletions, they are downloads. (Previously this was inside
-                // the twoWaySync branch only, leaving a hole when reconcile was
-                // on but twoWaySync was off.)
-                {
-                    const dlSet = new Set(toDownload.map((d) => d.path));
-                    candidateRemoteDelete = candidateRemoteDelete.filter((p) => !dlSet.has(p));
-                }
-
-                let candidateLocalDelete: string[] = [];
-                if (this.settings.twoWaySync) {
-                    // remote-deleted: in manifest, exists locally (from classifier), not in remote
-                    const rawCandidates = classified
-                        .filter((c) => c.kind === 'remote-deleted')
-                        .map((c) => c.file.path);
-                    // Verify each one with a per-file PROPFIND concurrently.
-                    // Yandex WebDAV listings can omit recently-PUT files (eventual
-                    // consistency); without this check we would offer to delete files
-                    // that actually exist.
-                    const verifyTasks = rawCandidates.map(
-                        (p) => async (): Promise<{ p: string; stillThere: boolean }> => {
-                            try {
-                                return { p, stillThere: await this.client.exists(`${syncFolder}/${p}`) };
-                            } catch {
-                                // Network error: be conservative, treat as still present.
-                                return { p, stillThere: true };
-                            }
-                        },
-                    );
-                    const verifyResults = await runWithConcurrency(
-                        verifyTasks,
-                        this.settings.maxConcurrency,
-                        cancelled,
-                    );
-                    for (const r of verifyResults) {
-                        if (r.status === 'fulfilled') {
-                            if (r.value.stillThere) session.skipped.push(r.value.p);
-                            else candidateLocalDelete.push(r.value.p);
-                        }
-                        // rejected = conservative skip (tasks catch internally so this won't happen)
-                    }
-                }
-
-                // Confirm remote deletions
-                if (candidateRemoteDelete.length > 0) {
-                    let approved: string[] | null = candidateRemoteDelete;
-                    if (this.settings.confirmBeforeDelete && cb.confirmRemoteDelete) {
-                        approved = await cb.confirmRemoteDelete(candidateRemoteDelete);
-                    }
-                    if (approved === null || approved.length === 0) {
-                        session.deleteSkippedRemote = candidateRemoteDelete;
-                        if (approved === null) new Notice(t('noticeDeleteCancelled'));
-                    } else {
-                        const skipped = candidateRemoteDelete.filter((p) => !approved!.includes(p));
-                        session.deleteSkippedRemote = skipped;
-                        let delCounter = 0;
-                        const delTotal = approved.length;
-                        for (const path of approved) {
-                            if (cancelled()) {
-                                session.cancelled = true;
-                                break;
-                            }
-                            cb.onProgress?.({
-                                phase: 'deleting',
-                                current: ++delCounter,
-                                total: delTotal,
-                                file: path,
-                            });
-                            if (dryRun) {
-                                session.deletedRemote.push(path);
-                                continue;
-                            }
-                            try {
-                                await this.deleteRemote(path, syncFolder, trashSub);
-                                session.deletedRemote.push(path);
-                                delete this.settings.manifest[path];
-                            } catch (err: any) {
-                                session.deleteFailed.push({
-                                    path,
-                                    reason: err?.message ?? String(err),
-                                });
-                            }
-                        }
-                    }
-                }
-
-                // Confirm local deletions
-                if (candidateLocalDelete.length > 0) {
-                    let approved: string[] | null = candidateLocalDelete;
-                    if (this.settings.confirmBeforeDelete && cb.confirmLocalDelete) {
-                        approved = await cb.confirmLocalDelete(candidateLocalDelete);
-                    }
-                    if (approved === null || approved.length === 0) {
-                        session.deleteSkippedLocal = candidateLocalDelete;
-                        if (approved === null) new Notice(t('noticeLocalDeleteCancelled'));
-                    } else {
-                        const skipped = candidateLocalDelete.filter((p) => !approved!.includes(p));
-                        session.deleteSkippedLocal = skipped;
-                        for (const path of approved) {
-                            if (cancelled()) {
-                                session.cancelled = true;
-                                break;
-                            }
-                            if (dryRun) {
-                                session.deletedLocal.push(path);
-                                continue;
-                            }
-                            try {
-                                await this.deleteLocal(path);
-                                session.deletedLocal.push(path);
-                                delete this.settings.manifest[path];
-                            } catch (err: any) {
-                                session.deleteFailed.push({
-                                    path,
-                                    reason: err?.message ?? String(err),
-                                });
-                            }
-                        }
-                    }
-                }
+                await this.runDeletionPhase({
+                    classified,
+                    toDownload,
+                    localPaths,
+                    remote,
+                    session,
+                    cb,
+                    cancelled,
+                    syncFolder,
+                    trashSub,
+                    logFolderPrefix,
+                    dryRun,
+                });
             }
 
             cb.onProgress?.({ phase: 'finishing', current: 1, total: 1 });
@@ -537,7 +307,7 @@ export class SyncEngine {
 
     // ---------- Classification ----------
 
-    private async classifyOne(file: TFile, remote: Map<string, DavEntry>): Promise<ClassifiedLocal> {
+    private async classifyOne(file: TFile, remote: Map<string, RemoteEntry>): Promise<ClassifiedLocal> {
         const manifestEntry = this.settings.manifest[file.path];
         const remoteEntry = remote.get(file.path);
 
@@ -624,7 +394,7 @@ export class SyncEngine {
 
     private async downloadOne(
         vaultPath: string,
-        entry: DavEntry | undefined,
+        entry: RemoteEntry | undefined,
         syncFolder: string,
     ): Promise<void> {
         const dispose = this.cb.onSelfWriteLocal?.(vaultPath);
@@ -637,7 +407,7 @@ export class SyncEngine {
 
     private async downloadOneInner(
         vaultPath: string,
-        entry: DavEntry | undefined,
+        entry: RemoteEntry | undefined,
         syncFolder: string,
     ): Promise<void> {
         const remotePath = `${syncFolder}/${vaultPath}`;
@@ -705,7 +475,7 @@ export class SyncEngine {
                 return;
             } catch (e: any) {
                 // If MOVE fails, fall back to DELETE so user isn't stuck
-                if (e instanceof WebDavError && e.status === 404) return;
+                if (e instanceof YandexApiError && e.status === 404) return;
                 console.warn('MOVE to trash failed, falling back to DELETE:', e);
             }
         }
@@ -764,16 +534,12 @@ export class SyncEngine {
         session: SessionReport,
     ): Promise<void> {
         const trashRoot = `${syncFolder}/${trashSub}`;
-        // List date subfolders by listing files (Depth: infinity captures everything)
-        // Easier: list with empty extension set -> we get nothing. Instead use a dedicated PROPFIND Depth:1 call.
-        // Reuse listFiles with all-known-extensions cheat? Simpler: skip granular discovery and try MOVE/DELETE per known date.
-        // We compute cutoff and look at top-level folder names by Depth:1.
         const exts = new Set(this.settings.includedExtensions.map((e) => e.toLowerCase()));
-        let trashFiles: Map<string, DavEntry>;
+        let trashFiles: Map<string, RemoteEntry>;
         try {
-            trashFiles = await this.client.listFiles(trashRoot, exts, []);
+            trashFiles = await this.client.list(trashRoot, exts, []);
         } catch (e: any) {
-            if (e instanceof WebDavError && e.status === 404) return;
+            if (e instanceof YandexApiError && e.status === 404) return;
             throw e;
         }
 
@@ -890,6 +656,371 @@ export class SyncEngine {
                 await this.ensureLocalFolder(rel);
             } catch (e: any) {
                 console.warn('ensureLocalFolder failed for', rel, e);
+            }
+        }
+    }
+
+    // ---------- Task builders ----------
+
+    /**
+     * Translates classified local files (plus conflict decisions) into a list
+     * of upload task closures. Skipped/unchanged/remote-handled entries are
+     * recorded into `session` directly. Conflict decisions may downgrade an
+     * entry to a download (`prefer-remote`) by mutating its `kind`.
+     */
+    private async buildUploadTasks(opts: {
+        classified: ClassifiedLocal[];
+        conflictDecisions: Map<string, ConflictAction>;
+        remoteOnly: string[];
+        remote: Map<string, RemoteEntry>;
+        session: SessionReport;
+        cb: SyncCallbacks;
+        cancelled: () => boolean;
+        syncFolder: string;
+        dryRun: boolean;
+        downloadOnly: boolean;
+    }): Promise<Array<() => Promise<void>>> {
+        const { classified, conflictDecisions, remoteOnly, remote, session, cb,
+            cancelled, syncFolder, dryRun, downloadOnly } = opts;
+        const tasks: Array<() => Promise<void>> = [];
+        let counter = 0;
+        const total = { v: 0 };
+
+        for (const c of classified) {
+            if (c.kind === 'unchanged') {
+                session.skipped.push(c.file.path);
+                continue;
+            }
+            // Handled in download / deletion phases.
+            if (c.kind === 'remote-newer' || c.kind === 'remote-deleted') continue;
+
+            if (downloadOnly) {
+                // Bootstrap: never push local state to the remote.
+                session.skipped.push(c.file.path);
+                continue;
+            }
+
+            if (c.kind === 'conflict') {
+                const d = conflictDecisions.get(c.file.path) ?? 'skip';
+                session.conflicts.push({ path: c.file.path, action: d });
+                if (d === 'skip') continue;
+                if (d === 'prefer-remote') {
+                    // Hand off to download phase by reclassifying.
+                    if (!remoteOnly.includes(c.file.path) && remote.has(c.file.path)) {
+                        c.kind = 'remote-newer';
+                    }
+                    continue;
+                }
+                if (d === 'keep-both') {
+                    if (!dryRun) {
+                        try {
+                            await this.saveRemoteAsConflictCopy(c.file, syncFolder);
+                        } catch (e: any) {
+                            session.uploadFailed.push({
+                                path: c.file.path,
+                                reason: `keep-both download failed: ${e?.message ?? e}`,
+                            });
+                            continue;
+                        }
+                    }
+                    // After saving the remote copy aside, the local version still
+                    // needs to be uploaded. Fall through to push the task.
+                }
+            }
+
+            total.v++;
+            tasks.push(async () => {
+                if (cancelled()) return;
+                const folder = c.file.parent?.path;
+                if (folder && folder !== '/' && !dryRun) {
+                    await this.client.ensureFolder(`${syncFolder}/${folder}`);
+                }
+                // Show "uploading X" BEFORE the transfer starts (not after),
+                // so the user knows which file is being sent right now.
+                cb.onProgress?.({
+                    phase: 'uploading',
+                    current: ++counter,
+                    total: total.v,
+                    file: c.file.path,
+                    sizeBytes: c.file.stat.size,
+                });
+                if (dryRun) {
+                    session.uploaded.push(c.file.path);
+                    return;
+                }
+                try {
+                    const { content } = await this.readContent(c.file);
+                    const remotePath = `${syncFolder}/${c.file.path}`;
+                    const { remoteMtime } = await this.client.put(
+                        remotePath,
+                        content,
+                        c.file.stat.size,
+                    );
+                    // Hash AFTER PUT — only stored in the manifest.
+                    const hash = c.localHash ?? (await sha256(content));
+                    session.uploaded.push(c.file.path);
+                    this.settings.manifest[c.file.path] = {
+                        hash,
+                        localMtime: c.file.stat.mtime,
+                        size: c.file.stat.size,
+                        remoteMtime: remoteMtime || Date.now(),
+                    };
+                    // Clear pulse + size label.
+                    cb.onProgress?.({
+                        phase: 'uploading',
+                        current: counter,
+                        total: total.v,
+                        file: c.file.path,
+                        sizeBytes: 0,
+                    });
+                } catch (err: any) {
+                    const msg = err?.message ?? String(err);
+                    session.uploadFailed.push({ path: c.file.path, reason: msg });
+                    new Notice(t('errorSpecific', c.file.name, msg));
+                }
+            });
+        }
+
+        return tasks;
+    }
+
+    private buildDownloadTasks(
+        toDownload: Array<{ path: string; entry?: RemoteEntry }>,
+        opts: {
+            session: SessionReport;
+            cb: SyncCallbacks;
+            cancelled: () => boolean;
+            syncFolder: string;
+            dryRun: boolean;
+        },
+    ): Array<() => Promise<void>> {
+        const { session, cb, cancelled, syncFolder, dryRun } = opts;
+        const total = toDownload.length;
+        let counter = 0;
+        return toDownload.map(({ path: p, entry }) => async () => {
+            if (cancelled()) return;
+            cb.onProgress?.({
+                phase: 'downloading',
+                current: ++counter,
+                total,
+                file: p,
+            });
+            if (dryRun) {
+                session.downloaded.push(p);
+                return;
+            }
+            try {
+                await this.downloadOne(p, entry, syncFolder);
+                session.downloaded.push(p);
+            } catch (err: any) {
+                session.downloadFailed.push({ path: p, reason: err?.message ?? String(err) });
+            }
+        });
+    }
+
+    // ---------- Deletion phase ----------
+
+    /**
+     * Orchestrates the deletion phase: identifies candidates on both sides,
+     * verifies local-delete candidates against the live remote (Yandex listings
+     * can lag), prompts the user, and applies the approved deletions.
+     */
+    private async runDeletionPhase(opts: {
+        classified: ClassifiedLocal[];
+        toDownload: Array<{ path: string; entry?: RemoteEntry }>;
+        localPaths: Set<string>;
+        remote: Map<string, RemoteEntry>;
+        session: SessionReport;
+        cb: SyncCallbacks;
+        cancelled: () => boolean;
+        syncFolder: string;
+        trashSub: string;
+        logFolderPrefix: string;
+        dryRun: boolean;
+    }): Promise<void> {
+        const candidateRemoteDelete = this.collectRemoteDeleteCandidates(
+            opts.localPaths,
+            opts.remote,
+            opts.toDownload,
+            opts.logFolderPrefix,
+            opts.trashSub,
+        );
+
+        const candidateLocalDelete = this.settings.twoWaySync
+            ? await this.collectLocalDeleteCandidates(opts.classified, opts.syncFolder, opts.session, opts.cancelled)
+            : [];
+
+        if (candidateRemoteDelete.length > 0) {
+            await this.applyRemoteDeletes(candidateRemoteDelete, opts);
+        }
+        if (candidateLocalDelete.length > 0) {
+            await this.applyLocalDeletes(candidateLocalDelete, opts);
+        }
+    }
+
+    private collectRemoteDeleteCandidates(
+        localPaths: Set<string>,
+        remote: Map<string, RemoteEntry>,
+        toDownload: Array<{ path: string }>,
+        logFolderPrefix: string,
+        trashSub: string,
+    ): string[] {
+        const fromManifest = Object.keys(this.settings.manifest).filter((p) => !localPaths.has(p));
+        const fromReconcile = this.settings.enablePropfindReconcile
+            ? [...remote.keys()].filter((p) => !localPaths.has(p))
+            : [];
+        const dlSet = new Set(toDownload.map((d) => d.path));
+        return unique([...fromManifest, ...fromReconcile])
+            .filter((p) => !p.startsWith(logFolderPrefix))
+            .filter((p) => !p.startsWith(`${trashSub}/`))
+            // Files queued for download are NOT deletions.
+            .filter((p) => !dlSet.has(p));
+    }
+
+    /**
+     * For each `remote-deleted` classification, double-check the file is really
+     * gone — Yandex Disk listings can omit a recently-uploaded file due to
+     * eventual consistency. Anything still present on the server is moved to
+     * `session.skipped` instead of being offered for local deletion.
+     */
+    private async collectLocalDeleteCandidates(
+        classified: ClassifiedLocal[],
+        syncFolder: string,
+        session: SessionReport,
+        cancelled: () => boolean,
+    ): Promise<string[]> {
+        const raw = classified
+            .filter((c) => c.kind === 'remote-deleted')
+            .map((c) => c.file.path);
+        if (raw.length === 0) return [];
+
+        const tasks = raw.map(
+            (p) => async (): Promise<{ p: string; stillThere: boolean }> => {
+                try {
+                    return { p, stillThere: await this.client.exists(`${syncFolder}/${p}`) };
+                } catch {
+                    // Network error: be conservative, treat as still present.
+                    return { p, stillThere: true };
+                }
+            },
+        );
+        const results = await runWithConcurrency(tasks, this.settings.maxConcurrency, cancelled);
+
+        const verified: string[] = [];
+        for (const r of results) {
+            if (r.status !== 'fulfilled') continue;
+            if (r.value.stillThere) session.skipped.push(r.value.p);
+            else verified.push(r.value.p);
+        }
+        return verified;
+    }
+
+    private async applyRemoteDeletes(
+        candidates: string[],
+        opts: {
+            session: SessionReport;
+            cb: SyncCallbacks;
+            cancelled: () => boolean;
+            syncFolder: string;
+            trashSub: string;
+            dryRun: boolean;
+        },
+    ): Promise<void> {
+        const { session, cb, cancelled, syncFolder, trashSub, dryRun } = opts;
+        let approved: string[] | null = candidates;
+        if (this.settings.confirmBeforeDelete && cb.confirmRemoteDelete) {
+            approved = await cb.confirmRemoteDelete(candidates);
+        }
+        if (approved === null || approved.length === 0) {
+            session.deleteSkippedRemote = candidates;
+            if (approved === null) new Notice(t('noticeDeleteCancelled'));
+            return;
+        }
+
+        const approvedSet = new Set(approved);
+        session.deleteSkippedRemote = candidates.filter((p) => !approvedSet.has(p));
+        let counter = 0;
+        const total = approved.length;
+        for (const path of approved) {
+            if (cancelled()) {
+                session.cancelled = true;
+                return;
+            }
+            cb.onProgress?.({
+                phase: 'deleting',
+                current: ++counter,
+                total,
+                file: path,
+            });
+            if (dryRun) {
+                session.deletedRemote.push(path);
+                continue;
+            }
+            try {
+                await this.deleteRemote(path, syncFolder, trashSub);
+                session.deletedRemote.push(path);
+                delete this.settings.manifest[path];
+            } catch (err: any) {
+                session.deleteFailed.push({ path, reason: err?.message ?? String(err) });
+            }
+        }
+    }
+
+    private async applyLocalDeletes(
+        candidates: string[],
+        opts: {
+            session: SessionReport;
+            cb: SyncCallbacks;
+            cancelled: () => boolean;
+            dryRun: boolean;
+        },
+    ): Promise<void> {
+        const { session, cb, cancelled, dryRun } = opts;
+        let decision: LocalDeleteDecision = candidates;
+        if (this.settings.confirmBeforeDelete && cb.confirmLocalDelete) {
+            decision = await cb.confirmLocalDelete(candidates);
+        }
+
+        // Restore branch: drop the manifest entry so the next sync classifies
+        // the file as `new` and re-uploads it. Don't delete locally.
+        if (decision !== null && typeof decision === 'object' && !Array.isArray(decision)) {
+            const restorePaths = decision.restore;
+            const restoreSet = new Set(restorePaths);
+            for (const p of restorePaths) {
+                if (!dryRun) delete this.settings.manifest[p];
+                session.restoredLocal.push(p);
+            }
+            session.deleteSkippedLocal = candidates.filter((p) => !restoreSet.has(p));
+            if (restorePaths.length > 0) {
+                new Notice(t('noticeRestoreScheduled', restorePaths.length));
+            }
+            return;
+        }
+
+        const approved: string[] | null = decision;
+        if (approved === null || approved.length === 0) {
+            session.deleteSkippedLocal = candidates;
+            if (approved === null) new Notice(t('noticeLocalDeleteCancelled'));
+            return;
+        }
+
+        const approvedSet = new Set(approved);
+        session.deleteSkippedLocal = candidates.filter((p) => !approvedSet.has(p));
+        for (const path of approved) {
+            if (cancelled()) {
+                session.cancelled = true;
+                return;
+            }
+            if (dryRun) {
+                session.deletedLocal.push(path);
+                continue;
+            }
+            try {
+                await this.deleteLocal(path);
+                session.deletedLocal.push(path);
+                delete this.settings.manifest[path];
+            } catch (err: any) {
+                session.deleteFailed.push({ path, reason: err?.message ?? String(err) });
             }
         }
     }

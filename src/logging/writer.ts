@@ -1,10 +1,10 @@
 import { App, Notice, TFile, TFolder } from 'obsidian';
-import { REMOTE_LOGS_SUBFOLDER, WEBDAV_BASE } from '../constants';
+import { REMOTE_LOGS_SUBFOLDER } from '../constants';
 import { t } from '../i18n';
 import { YandexSyncSettings } from '../settings/types';
 import { SessionReport } from '../sync/SessionReport';
 import { formatTs } from '../sync/SyncEngine';
-import { YandexWebDavClient } from '../webdav/client';
+import { YandexClient } from '../api/client';
 
 export function renderLog(s: SessionReport): string {
     const list = (items: string[]) =>
@@ -85,7 +85,7 @@ export class LogWriter {
     constructor(
         private app: App,
         private settings: YandexSyncSettings,
-        private client: YandexWebDavClient,
+        private client: YandexClient,
     ) { }
 
     private localFolder(): string {
@@ -202,6 +202,3 @@ export class LogWriter {
         return s;
     }
 }
-
-// Reference WEBDAV_BASE so esbuild keeps the import (also useful if extended later).
-void WEBDAV_BASE;

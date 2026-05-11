@@ -14,6 +14,9 @@ export interface SessionReport {
     deletedLocal: string[];
     deleteSkippedRemote: string[];
     deleteSkippedLocal: string[];
+    /** Files the user chose to restore from local back to the remote.
+     * Their manifest entry was cleared so they will be re-uploaded next sync. */
+    restoredLocal: string[];
     conflicts: { path: string; action: ConflictAction | 'unresolved' }[];
     trashCleaned: string[];
 
@@ -37,6 +40,7 @@ export function newSession(dryRun = false): SessionReport {
         deletedLocal: [],
         deleteSkippedRemote: [],
         deleteSkippedLocal: [],
+        restoredLocal: [],
         conflicts: [],
         trashCleaned: [],
         uploadFailed: [],
