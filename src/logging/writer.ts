@@ -5,6 +5,7 @@ import { YandexSyncSettings } from '../settings/types';
 import { SessionReport } from '../sync/SessionReport';
 import { formatTs } from '../sync/SyncEngine';
 import { YandexClient } from '../api/client';
+import { errorMessage } from '../util/errors';
 
 export function renderLog(s: SessionReport): string {
     const list = (items: string[]) =>
@@ -110,9 +111,9 @@ export class LogWriter {
             } else {
                 await this.app.vault.create(localPath, content);
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error('Local log write failed:', e);
-            new Notice(t('errorLogWrite', e?.message ?? String(e)));
+            new Notice(t('errorLogWrite', errorMessage(e)));
             return null;
         }
 
@@ -121,14 +122,14 @@ export class LogWriter {
             const syncFolder = this.normalizeRemote(this.settings.syncFolder);
             await this.client.ensureFolder(`${syncFolder}/${REMOTE_LOGS_SUBFOLDER}`);
             await this.client.put(`${syncFolder}/${REMOTE_LOGS_SUBFOLDER}/${fileName}`, content);
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error('Remote log write failed:', e);
         }
 
         // Rotate (best-effort)
         try {
             await this.rotate();
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.warn('Log rotation failed:', e);
         }
 
@@ -169,9 +170,9 @@ export class LogWriter {
             const overLimit = i >= maxFiles;
             if (tooOld || overLimit) {
                 try {
-                    // Use vault.trash so users can recover accidentally rotated logs
-                    // (system trash if available, otherwise the vault's .trash folder).
-                    await this.app.vault.trash(f, true);
+                    // Use FileManager.trashFile so the user's vault deletion
+                    // preference is respected (system trash / .trash / permanent).
+                    await this.app.fileManager.trashFile(f);
                 } catch {
                     /* ignore */
                 }
@@ -189,8 +190,8 @@ export class LogWriter {
             if (af) continue;
             try {
                 await this.app.vault.createFolder(cur);
-            } catch (e: any) {
-                if (!/already exists/i.test(String(e?.message ?? e))) throw e;
+            } catch (e: unknown) {
+                if (!/already exists/i.test(errorMessage(e))) throw e;
             }
         }
     }

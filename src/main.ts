@@ -8,6 +8,7 @@ import { ConfigSyncEngine, ConfigSyncReport } from './sync/configSync';
 import { SessionReport } from './sync/SessionReport';
 import { ConflictModal, ConfirmModal, ProgressModal, SelectionModal } from './ui/modals';
 import { YandexClient } from './api/client';
+import { errorMessage } from './util/errors';
 
 export default class YandexSyncPlugin extends Plugin {
     settings!: YandexSyncSettings;
@@ -105,7 +106,7 @@ export default class YandexSyncPlugin extends Plugin {
     }
 
     async loadSettings(): Promise<void> {
-        const raw = await this.loadData();
+        const raw = (await this.loadData()) as unknown;
         const migrated = migrateSettings(raw ?? {});
         this.settings = Object.assign({}, DEFAULT_SETTINGS, migrated);
         if (!this.settings.manifest || typeof this.settings.manifest !== 'object') {
@@ -127,10 +128,9 @@ export default class YandexSyncPlugin extends Plugin {
         this.savePending = true;
         if (this.saveDebounceTimer !== null) window.clearTimeout(this.saveDebounceTimer);
         return new Promise<void>((resolve) => {
-            this.saveDebounceTimer = window.setTimeout(async () => {
+            this.saveDebounceTimer = window.setTimeout(() => {
                 this.saveDebounceTimer = null;
-                await this.flushSettings();
-                resolve();
+                this.flushSettings().then(resolve, resolve);
             }, 400);
         });
     }
@@ -211,21 +211,23 @@ export default class YandexSyncPlugin extends Plugin {
                 t('confirmCreateFolderDesc', folder),
                 t('confirmCreateFolderBtn'),
                 false,
-                async (ok) => {
-                    if (!ok) return;
-                    try {
-                        await client.ensureFolder(folder);
-                    } catch (e: any) {
-                        new Notice(t('noticeFolderCreateFail', e?.message ?? String(e)));
-                        return;
-                    }
-                    new Notice(t('noticeFolderCreated', folder));
-                    const recheck = await client.testConnection(folder);
-                    if (recheck.ok) {
-                        new Notice(t('noticeTestOk', recheck.count, folder));
-                    } else {
-                        new Notice(t('noticeTestFail', recheck.message));
-                    }
+                (ok) => {
+                    void (async () => {
+                        if (!ok) return;
+                        try {
+                            await client.ensureFolder(folder);
+                        } catch (e: unknown) {
+                            new Notice(t('noticeFolderCreateFail', errorMessage(e)));
+                            return;
+                        }
+                        new Notice(t('noticeFolderCreated', folder));
+                        const recheck = await client.testConnection(folder);
+                        if (recheck.ok) {
+                            new Notice(t('noticeTestOk', recheck.count, folder));
+                        } else {
+                            new Notice(t('noticeTestFail', recheck.message));
+                        }
+                    })();
                 },
             ).open();
             return;
@@ -266,45 +268,47 @@ export default class YandexSyncPlugin extends Plugin {
             t('bootstrapConfirmDesc', folder),
             t('bootstrapConfirmBtn'),
             true,
-            async (ok) => {
-                if (!ok) return;
-                new Notice(t('bootstrapStarting'));
+            (ok) => {
+                void (async () => {
+                    if (!ok) return;
+                    new Notice(t('bootstrapStarting'));
 
-                // Force config-sync ON for this run; restore afterwards regardless of outcome.
-                const prevConfigSync = this.settings.syncObsidianConfig;
-                this.settings.syncObsidianConfig = true;
+                    // Force config-sync ON for this run; restore afterwards regardless of outcome.
+                    const prevConfigSync = this.settings.syncObsidianConfig;
+                    this.settings.syncObsidianConfig = true;
 
-                // Snapshot counters to compute "downloaded during bootstrap".
-                // We track via a one-shot wrapper that captures the report from startSync.
-                const before = {
-                    notes: 0,
-                    config: 0,
-                };
-                this.bootstrapResultSink = (notes, config) => {
-                    before.notes = notes;
-                    before.config = config;
-                };
+                    // Snapshot counters to compute "downloaded during bootstrap".
+                    // We track via a one-shot wrapper that captures the report from startSync.
+                    const before = {
+                        notes: 0,
+                        config: 0,
+                    };
+                    this.bootstrapResultSink = (notes, config) => {
+                        before.notes = notes;
+                        before.config = config;
+                    };
 
-                try {
-                    await this.startSync(false, /*silent*/ false, /*downloadOnly*/ true);
-                } finally {
-                    this.settings.syncObsidianConfig = prevConfigSync;
-                    this.bootstrapResultSink = null;
-                    await this.flushSettings();
-                }
+                    try {
+                        await this.startSync(false, /*silent*/ false, /*downloadOnly*/ true);
+                    } finally {
+                        this.settings.syncObsidianConfig = prevConfigSync;
+                        this.bootstrapResultSink = null;
+                        await this.flushSettings();
+                    }
 
-                // Show the restart prompt regardless of file counts \u2014 the user
-                // explicitly opted in and might want to restart anyway.
-                new ConfirmModal(
-                    this.app,
-                    t('bootstrapDoneTitle'),
-                    t('bootstrapDoneDesc', before.notes, before.config),
-                    t('bootstrapDoneBtn'),
-                    false,
-                    () => {
-                        /* nothing to do \u2014 user restarts Obsidian themselves */
-                    },
-                ).open();
+                    // Show the restart prompt regardless of file counts — the user
+                    // explicitly opted in and might want to restart anyway.
+                    new ConfirmModal(
+                        this.app,
+                        t('bootstrapDoneTitle'),
+                        t('bootstrapDoneDesc', before.notes, before.config),
+                        t('bootstrapDoneBtn'),
+                        false,
+                        () => {
+                            /* nothing to do — user restarts Obsidian themselves */
+                        },
+                    ).open();
+                })();
             },
         ).open();
     }
@@ -432,7 +436,7 @@ export default class YandexSyncPlugin extends Plugin {
             try {
                 const writer = new LogWriter(this.app, this.settings, client);
                 await writer.write(session);
-            } catch (e: any) {
+            } catch (e: unknown) {
                 console.error('Log writer error:', e);
             }
         }

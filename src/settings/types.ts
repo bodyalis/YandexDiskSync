@@ -144,5 +144,5 @@ export function migrateSettings(raw: unknown): Partial<YandexSyncSettings> {
     if (!r.configManifest || typeof r.configManifest !== 'object') {
         r.configManifest = {};
     }
-    return r as Partial<YandexSyncSettings>;
+    return r;
 }

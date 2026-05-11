@@ -147,11 +147,13 @@ export class YandexSyncSettingTab extends PluginSettingTab {
                             t('confirmEnableConfigSyncDesc'),
                             t('confirmEnableConfigSyncBtn'),
                             true,
-                            async (ok) => {
-                                if (!ok) return;
-                                s.syncObsidianConfig = true;
-                                toggle.setValue(true);
-                                await this.plugin.saveSettings();
+                            (ok) => {
+                                void (async () => {
+                                    if (!ok) return;
+                                    s.syncObsidianConfig = true;
+                                    toggle.setValue(true);
+                                    await this.plugin.saveSettings();
+                                })();
                             },
                         ).open();
                         return;
@@ -422,11 +424,13 @@ export class YandexSyncSettingTab extends PluginSettingTab {
                             t('settingResetManifestConfirmDesc'),
                             t('confirmYesBtn'),
                             true,
-                            async (ok) => {
-                                if (!ok) return;
-                                this.plugin.settings.manifest = {};
-                                await this.plugin.saveSettings();
-                                new Notice(t('noticeManifestCleared'));
+                            (ok) => {
+                                void (async () => {
+                                    if (!ok) return;
+                                    this.plugin.settings.manifest = {};
+                                    await this.plugin.saveSettings();
+                                    new Notice(t('noticeManifestCleared'));
+                                })();
                             },
                         ).open();
                     }),

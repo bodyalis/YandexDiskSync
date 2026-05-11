@@ -50,21 +50,21 @@ export class SelectionModal extends Modal {
         });
         const allBtn = toolbar.createEl('button', { text: t('selectAllBtn'), cls: 'yds-toolbtn' });
         const noneBtn = toolbar.createEl('button', { text: t('selectNoneBtn'), cls: 'yds-toolbtn' });
-        const countLabel = toolbar.createEl('span', { cls: 'yds-count' });
+        const countLabel = toolbar.createSpan({ cls: 'yds-count' });
 
         const list = contentEl.createDiv({ cls: 'yds-list' });
 
         const rows: { row: HTMLDivElement; checkbox: HTMLInputElement; path: string }[] = [];
         for (const p of this.paths) {
             const row = list.createDiv({ cls: 'yds-row' });
-            const cb = row.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+            const cb = row.createEl('input', { type: 'checkbox' });
             cb.checked = this.selected.has(p);
             cb.addEventListener('change', () => {
                 if (cb.checked) this.selected.add(p);
                 else this.selected.delete(p);
                 updateCount();
             });
-            const label = row.createEl('span', { text: p, cls: 'yds-path' });
+            const label = row.createSpan({ text: p, cls: 'yds-path' });
             label.addEventListener('click', () => {
                 cb.checked = !cb.checked;
                 cb.dispatchEvent(new Event('change'));

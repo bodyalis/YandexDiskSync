@@ -9,6 +9,7 @@ import {
 import { t } from '../i18n';
 import { ManifestEntry, YandexSyncSettings } from '../settings/types';
 import { RemoteEntry, YandexApiError, YandexClient } from '../api/client';
+import { errorMessage } from '../util/errors';
 import { sha256 } from './hash';
 import { runWithConcurrency } from './concurrency';
 
@@ -28,7 +29,9 @@ export interface ConfigSyncCallbacks {
     onProgress?: (current: number, total: number, file: string) => void;
 }
 
-const CONFIG_ROOT = '.obsidian';
+// Obsidian's configuration folder is normally `.obsidian`, but the user may
+// override it via `app.vault.configDir`. Always read it from the live vault
+// instead of hardcoding the name.
 
 /**
  * Syncs the entire .obsidian/ directory (settings, hotkeys, themes, snippets,
@@ -47,6 +50,10 @@ export class ConfigSyncEngine {
         private client: YandexClient,
         private saveSettings: () => Promise<void>,
     ) { }
+
+    private get configRoot(): string {
+        return this.app.vault.configDir;
+    }
 
     async run(callbacks: ConfigSyncCallbacks = {}, dryRun = false, downloadOnly = false): Promise<ConfigSyncReport> {
         const report: ConfigSyncReport = {
@@ -68,7 +75,7 @@ export class ConfigSyncEngine {
 
             // 1. Walk local .obsidian/ recursively
             const localFiles = new Map<string, { mtime: number; size: number }>();
-            await this.walkLocal(CONFIG_ROOT, localFiles);
+            await this.walkLocal(this.configRoot, localFiles);
 
             // 2. Apply excludes
             const isExcluded = this.makeExcluder();
@@ -80,14 +87,14 @@ export class ConfigSyncEngine {
             let remoteFiles = new Map<string, RemoteEntry>();
             try {
                 remoteFiles = await this.client.list(remoteRoot, null, []);
-            } catch (e: any) {
+            } catch (e: unknown) {
                 if (!(e instanceof YandexApiError && e.status === 404)) {
                     console.warn('Config-sync remote listing failed:', e);
-                    report.errors.push({ path: remoteRoot, reason: e?.message ?? String(e) });
+                    report.errors.push({ path: remoteRoot, reason: errorMessage(e) });
                 }
             }
             for (const p of [...remoteFiles.keys()]) {
-                if (isExcluded(`${CONFIG_ROOT}/${p}`)) remoteFiles.delete(p);
+                if (isExcluded(`${this.configRoot}/${p}`)) remoteFiles.delete(p);
             }
 
             if (cancelled()) {
@@ -98,7 +105,7 @@ export class ConfigSyncEngine {
             // 4. Plan actions
             const allPaths = new Set<string>();
             for (const p of localFiles.keys()) allPaths.add(p);
-            for (const p of remoteFiles.keys()) allPaths.add(`${CONFIG_ROOT}/${p}`);
+            for (const p of remoteFiles.keys()) allPaths.add(`${this.configRoot}/${p}`);
             for (const p of Object.keys(this.settings.configManifest)) allPaths.add(p);
 
             const uploadList: string[] = [];
@@ -107,8 +114,8 @@ export class ConfigSyncEngine {
             const localDeleteList: string[] = [];
 
             for (const vaultPath of allPaths) {
-                const remoteRel = vaultPath.startsWith(CONFIG_ROOT + '/')
-                    ? vaultPath.substring(CONFIG_ROOT.length + 1)
+                const remoteRel = vaultPath.startsWith(this.configRoot + '/')
+                    ? vaultPath.substring(this.configRoot.length + 1)
                     : vaultPath;
                 const local = localFiles.get(vaultPath);
                 const remote = remoteFiles.get(remoteRel);
@@ -191,8 +198,8 @@ export class ConfigSyncEngine {
                 try {
                     await this.uploadOne(vaultPath, syncFolder);
                     report.uploaded.push(vaultPath);
-                } catch (e: any) {
-                    report.errors.push({ path: vaultPath, reason: e?.message ?? String(e) });
+                } catch (e: unknown) {
+                    report.errors.push({ path: vaultPath, reason: errorMessage(e) });
                 }
             });
 
@@ -205,12 +212,12 @@ export class ConfigSyncEngine {
                     return;
                 }
                 try {
-                    const remoteRel = vaultPath.substring(CONFIG_ROOT.length + 1);
+                    const remoteRel = vaultPath.substring(this.configRoot.length + 1);
                     const entry = remoteFiles.get(remoteRel);
                     await this.downloadOne(vaultPath, syncFolder, entry);
                     report.downloaded.push(vaultPath);
-                } catch (e: any) {
-                    report.errors.push({ path: vaultPath, reason: e?.message ?? String(e) });
+                } catch (e: unknown) {
+                    report.errors.push({ path: vaultPath, reason: errorMessage(e) });
                 }
             });
 
@@ -236,12 +243,12 @@ export class ConfigSyncEngine {
                         continue;
                     }
                     try {
-                        const remoteRel = vaultPath.substring(CONFIG_ROOT.length + 1);
+                        const remoteRel = vaultPath.substring(this.configRoot.length + 1);
                         await this.client.delete(`${syncFolder}/${OBSIDIAN_CONFIG_REMOTE_SUBFOLDER}/${remoteRel}`);
                         delete this.settings.configManifest[vaultPath];
                         report.deletedRemote.push(vaultPath);
-                    } catch (e: any) {
-                        report.errors.push({ path: vaultPath, reason: e?.message ?? String(e) });
+                    } catch (e: unknown) {
+                        report.errors.push({ path: vaultPath, reason: errorMessage(e) });
                     }
                 }
                 for (const vaultPath of localDeleteList) {
@@ -255,17 +262,17 @@ export class ConfigSyncEngine {
                         await this.app.vault.adapter.remove(vaultPath);
                         delete this.settings.configManifest[vaultPath];
                         report.deletedLocal.push(vaultPath);
-                    } catch (e: any) {
-                        report.errors.push({ path: vaultPath, reason: e?.message ?? String(e) });
+                    } catch (e: unknown) {
+                        report.errors.push({ path: vaultPath, reason: errorMessage(e) });
                     }
                 }
             }
 
             if (!dryRun) await this.saveSettings();
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error('Config-sync fatal:', e);
             report.aborted = true;
-            report.errors.push({ path: '', reason: e?.message ?? String(e) });
+            report.errors.push({ path: '', reason: errorMessage(e) });
             new Notice(t('errorSync'));
         }
 
@@ -303,14 +310,14 @@ export class ConfigSyncEngine {
 
     private makeExcluder(): (vaultPath: string) => boolean {
         const forced = OBSIDIAN_CONFIG_FORCED_EXCLUDES;
-        const selfPluginPrefix = `${CONFIG_ROOT}/plugins/${SELF_PLUGIN_ID}/`;
+        const selfPluginPrefix = `${this.configRoot}/plugins/${SELF_PLUGIN_ID}/`;
         const excludeData = this.settings.excludeObsidianPluginData;
         const excludeBins = this.settings.excludeObsidianPluginBinaries;
         const excludeHotkeys = this.settings.excludeObsidianHotkeys;
         return (p: string) => {
             // Always skip own plugin folder (avoid clobbering settings/manifest across machines).
             if (p.startsWith(selfPluginPrefix)) return true;
-            const rel = p.startsWith(CONFIG_ROOT + '/') ? p.substring(CONFIG_ROOT.length + 1) : p;
+            const rel = p.startsWith(this.configRoot + '/') ? p.substring(this.configRoot.length + 1) : p;
             const basename = rel.split('/').pop() ?? '';
             if (forced.includes(basename)) return true;
             if (excludeHotkeys && rel === 'hotkeys.json') return true;
@@ -333,7 +340,7 @@ export class ConfigSyncEngine {
 
     private async uploadOne(vaultPath: string, syncFolder: string): Promise<void> {
         const adapter = this.app.vault.adapter;
-        const remoteRel = vaultPath.substring(CONFIG_ROOT.length + 1);
+        const remoteRel = vaultPath.substring(this.configRoot.length + 1);
         const remotePath = `${syncFolder}/${OBSIDIAN_CONFIG_REMOTE_SUBFOLDER}/${remoteRel}`;
         const ext = remoteRel.split('.').pop()?.toLowerCase() ?? '';
         const isBinary = BINARY_EXTENSIONS.has(ext);
@@ -374,7 +381,7 @@ export class ConfigSyncEngine {
         entry: RemoteEntry | undefined,
     ): Promise<void> {
         const adapter = this.app.vault.adapter;
-        const remoteRel = vaultPath.substring(CONFIG_ROOT.length + 1);
+        const remoteRel = vaultPath.substring(this.configRoot.length + 1);
         const remotePath = `${syncFolder}/${OBSIDIAN_CONFIG_REMOTE_SUBFOLDER}/${remoteRel}`;
         const ext = remoteRel.split('.').pop()?.toLowerCase() ?? '';
         const isBinary = BINARY_EXTENSIONS.has(ext);

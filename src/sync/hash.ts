@@ -2,7 +2,7 @@
 export async function sha256(data: string | ArrayBuffer): Promise<string> {
     let buffer: ArrayBuffer;
     if (typeof data === 'string') {
-        buffer = new TextEncoder().encode(data).buffer as ArrayBuffer;
+        buffer = new TextEncoder().encode(data).buffer;
     } else {
         buffer = data;
     }

@@ -1,4 +1,9 @@
 // Localization (i18n)
+//
+// UI strings legitimately reference ".obsidian/" as the visible name of the
+// config folder users see in their file manager. Disable the obsidianmd rule
+// here because it cannot distinguish translation strings from runtime paths.
+/* eslint-disable obsidianmd/hardcoded-config-path */
 
 const en = {
     // Plugin meta
@@ -394,7 +399,24 @@ const ru: typeof en = {
 };
 
 function detectLang(): typeof en {
+    // Obsidian 1.8+ exposes `getLanguage()` from the 'obsidian' module. Older
+    // builds (we support 1.4+) used the `language` localStorage key directly.
+    // Resolve the helper via require() so we don't break loading on legacy
+    // versions where the symbol is missing.
     try {
+        const obs = (window as unknown as { require?: (m: string) => unknown }).require?.('obsidian') as
+            | { getLanguage?: () => string }
+            | undefined;
+        const fromApi = obs?.getLanguage?.();
+        if (fromApi === 'ru') return ru;
+        if (fromApi) return en;
+    } catch {
+        /* getLanguage may be missing on older Obsidian builds */
+    }
+    try {
+        // Fallback for Obsidian builds older than 1.8 that don't expose
+        // getLanguage(); the language preference is stored under this key.
+        // eslint-disable-next-line obsidianmd/prefer-get-language
         const lang = window.localStorage.getItem('language');
         if (lang === 'ru') return ru;
     } catch {

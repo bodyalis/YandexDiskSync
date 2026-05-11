@@ -8,22 +8,26 @@ export async function runWithConcurrency<T>(
     shouldStop?: () => boolean,
 ): Promise<PromiseSettledResult<T>[]> {
     const c = Math.max(1, Math.floor(concurrency));
-    const results: PromiseSettledResult<T>[] = new Array(tasks.length);
+    const results: PromiseSettledResult<T>[] = new Array<PromiseSettledResult<T>>(tasks.length);
     let nextIdx = 0;
 
-    const workers = new Array(Math.min(c, tasks.length)).fill(0).map(async () => {
-        while (true) {
-            if (shouldStop?.()) return;
-            const idx = nextIdx++;
-            if (idx >= tasks.length) return;
-            try {
-                const value = await tasks[idx]();
-                results[idx] = { status: 'fulfilled', value };
-            } catch (reason) {
-                results[idx] = { status: 'rejected', reason };
+    const workerCount = Math.min(c, tasks.length);
+    const workers: Promise<void>[] = [];
+    for (let w = 0; w < workerCount; w++) {
+        workers.push((async () => {
+            while (true) {
+                if (shouldStop?.()) return;
+                const idx = nextIdx++;
+                if (idx >= tasks.length) return;
+                try {
+                    const value = await tasks[idx]();
+                    results[idx] = { status: 'fulfilled', value };
+                } catch (reason: unknown) {
+                    results[idx] = { status: 'rejected', reason };
+                }
             }
-        }
-    });
+        })());
+    }
 
     await Promise.all(workers);
     // Fill any holes (when stopped early) with rejected sentinel

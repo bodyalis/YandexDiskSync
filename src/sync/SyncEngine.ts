@@ -1,8 +1,9 @@
 import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian';
 import { BINARY_EXTENSIONS, LARGE_FILE_CACHE_THRESHOLD, MTIME_TOLERANCE_MS, REMOTE_LOGS_SUBFOLDER } from '../constants';
 import { t } from '../i18n';
-import { ManifestEntry, YandexSyncSettings, ConflictStrategy } from '../settings/types';
+import { YandexSyncSettings } from '../settings/types';
 import { RemoteEntry, YandexApiError, YandexClient } from '../api/client';
+import { errorMessage } from '../util/errors';
 import { sha256 } from './hash';
 import { runWithConcurrency } from './concurrency';
 import { compileGlobs } from './glob';
@@ -90,7 +91,7 @@ export class SyncEngine {
             if (!dryRun && this.settings.useTrash && this.settings.trashRetentionDays > 0) {
                 try {
                     await this.cleanTrash(syncFolder, trashSub, session);
-                } catch (e: any) {
+                } catch (e: unknown) {
                     console.warn('Trash cleanup failed:', e);
                 }
             }
@@ -121,7 +122,7 @@ export class SyncEngine {
                         [REMOTE_LOGS_SUBFOLDER, trashSub],
                         remoteFolders,
                     );
-                } catch (e: any) {
+                } catch (e: unknown) {
                     console.error('Remote listing failed:', e);
                     // 429 = rate limited: Yandex will likely throttle subsequent
                     // requests too. Abort now instead of hanging for minutes.
@@ -131,7 +132,7 @@ export class SyncEngine {
                         new Notice(t('errRateLimit'));
                         return session;
                     }
-                    session.otherErrors.push({ reason: `Remote listing failed: ${e?.message ?? e}` });
+                    session.otherErrors.push({ reason: `Remote listing failed: ${errorMessage(e)}` });
                 }
             }
 
@@ -262,7 +263,7 @@ export class SyncEngine {
                     dryRun,
                     cancelled,
                 });
-            } catch (e: any) {
+            } catch (e: unknown) {
                 console.warn('Empty-folder sync failed:', e);
             }
             if (cancelled()) {
@@ -293,10 +294,10 @@ export class SyncEngine {
                 // progress modal doesn't close before the manifest is written.
                 await this.saveSettings();
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             console.error('Sync engine fatal:', e);
             session.aborted = true;
-            session.otherErrors.push({ reason: e?.message ?? String(e) });
+            session.otherErrors.push({ reason: errorMessage(e) });
             new Notice(t('errorSync'));
         } finally {
             session.finishedAt = Date.now();
@@ -362,7 +363,7 @@ export class SyncEngine {
         const map = new Map<string, ConflictAction>();
         const s = this.settings.conflictStrategy;
         const action: ConflictAction =
-            s === 'ask' ? 'skip' : (s as ConflictAction); // fallback if no callback provided
+            s === 'ask' ? 'skip' : (s); // fallback if no callback provided
         for (const p of paths) map.set(p, action);
         return map;
     }
@@ -473,7 +474,7 @@ export class SyncEngine {
             try {
                 await this.client.move(src, dst, true);
                 return;
-            } catch (e: any) {
+            } catch (e: unknown) {
                 // If MOVE fails, fall back to DELETE so user isn't stuck
                 if (e instanceof YandexApiError && e.status === 404) return;
                 console.warn('MOVE to trash failed, falling back to DELETE:', e);
@@ -487,8 +488,9 @@ export class SyncEngine {
         try {
             const af = this.app.vault.getAbstractFileByPath(vaultPath);
             if (!af) return;
-            // Use Obsidian trash (configurable in vault settings)
-            await this.app.vault.trash(af, true);
+            // Use FileManager.trashFile so the user's vault deletion preference
+            // (system trash / .trash / permanent) is respected.
+            await this.app.fileManager.trashFile(af);
         } finally {
             dispose?.();
         }
@@ -538,7 +540,7 @@ export class SyncEngine {
         let trashFiles: Map<string, RemoteEntry>;
         try {
             trashFiles = await this.client.list(trashRoot, exts, []);
-        } catch (e: any) {
+        } catch (e: unknown) {
             if (e instanceof YandexApiError && e.status === 404) return;
             throw e;
         }
@@ -560,7 +562,7 @@ export class SyncEngine {
             try {
                 await this.client.delete(`${trashRoot}/${rel}`);
                 session.trashCleaned.push(`${trashSub}/${rel}`);
-            } catch (e: any) {
+            } catch (e: unknown) {
                 console.warn('Trash cleanup failed for', rel, e);
             }
         }
@@ -577,8 +579,8 @@ export class SyncEngine {
             if (af) continue; // exists as file (weird), don't try to create
             try {
                 await this.app.vault.createFolder(cur);
-            } catch (e: any) {
-                if (!/already exists/i.test(String(e?.message ?? e))) throw e;
+            } catch (e: unknown) {
+                if (!/already exists/i.test(errorMessage(e))) throw e;
             }
         }
     }
@@ -640,7 +642,7 @@ export class SyncEngine {
                 if (dryRun) continue;
                 try {
                     await this.client.ensureFolder(`${syncFolder}/${rel}`);
-                } catch (e: any) {
+                } catch (e: unknown) {
                     console.warn('ensureFolder (remote) failed for', rel, e);
                 }
             }
@@ -654,7 +656,7 @@ export class SyncEngine {
             if (dryRun) continue;
             try {
                 await this.ensureLocalFolder(rel);
-            } catch (e: any) {
+            } catch (e: unknown) {
                 console.warn('ensureLocalFolder failed for', rel, e);
             }
         }
@@ -715,10 +717,10 @@ export class SyncEngine {
                     if (!dryRun) {
                         try {
                             await this.saveRemoteAsConflictCopy(c.file, syncFolder);
-                        } catch (e: any) {
+                        } catch (e: unknown) {
                             session.uploadFailed.push({
                                 path: c.file.path,
-                                reason: `keep-both download failed: ${e?.message ?? e}`,
+                                reason: `keep-both download failed: ${errorMessage(e)}`,
                             });
                             continue;
                         }
@@ -773,8 +775,8 @@ export class SyncEngine {
                         file: c.file.path,
                         sizeBytes: 0,
                     });
-                } catch (err: any) {
-                    const msg = err?.message ?? String(err);
+                } catch (err: unknown) {
+                    const msg = errorMessage(err);
                     session.uploadFailed.push({ path: c.file.path, reason: msg });
                     new Notice(t('errorSpecific', c.file.name, msg));
                 }
@@ -812,8 +814,8 @@ export class SyncEngine {
             try {
                 await this.downloadOne(p, entry, syncFolder);
                 session.downloaded.push(p);
-            } catch (err: any) {
-                session.downloadFailed.push({ path: p, reason: err?.message ?? String(err) });
+            } catch (err: unknown) {
+                session.downloadFailed.push({ path: p, reason: errorMessage(err) });
             }
         });
     }
@@ -960,8 +962,8 @@ export class SyncEngine {
                 await this.deleteRemote(path, syncFolder, trashSub);
                 session.deletedRemote.push(path);
                 delete this.settings.manifest[path];
-            } catch (err: any) {
-                session.deleteFailed.push({ path, reason: err?.message ?? String(err) });
+            } catch (err: unknown) {
+                session.deleteFailed.push({ path, reason: errorMessage(err) });
             }
         }
     }
@@ -1019,8 +1021,8 @@ export class SyncEngine {
                 await this.deleteLocal(path);
                 session.deletedLocal.push(path);
                 delete this.settings.manifest[path];
-            } catch (err: any) {
-                session.deleteFailed.push({ path, reason: err?.message ?? String(err) });
+            } catch (err: unknown) {
+                session.deleteFailed.push({ path, reason: errorMessage(err) });
             }
         }
     }

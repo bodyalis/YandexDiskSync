@@ -45,7 +45,7 @@ export interface ClientOptions {
     onRetry?: (attempt: number, status: number, delayMs: number) => void;
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number): Promise<void> => new Promise((r) => activeWindow.setTimeout(r, ms));
 
 function diskPath(p: string): string {
     return 'disk:' + (p.startsWith('/') ? p : '/' + p);
@@ -342,7 +342,8 @@ export class YandexClient {
             const total = json._embedded?.total ?? items.length;
 
             for (const item of items) {
-                const fullPathRaw = String(item.path ?? '').replace(/^disk:/, '');
+                const rawPath = item.path;
+                const fullPathRaw = (typeof rawPath === 'string' ? rawPath : '').replace(/^disk:/, '');
                 const full = fullPathRaw.replace(/^\/+/, '');
                 let rel: string;
                 if (rootPrefix === '') {
