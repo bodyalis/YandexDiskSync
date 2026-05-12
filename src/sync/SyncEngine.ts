@@ -490,6 +490,7 @@ export class SyncEngine {
             if (!af) return;
             // Use FileManager.trashFile so the user's vault deletion preference
             // (system trash / .trash / permanent) is respected.
+            // eslint-disable-next-line obsidianmd/no-unsupported-api
             await this.app.fileManager.trashFile(af);
         } finally {
             dispose?.();

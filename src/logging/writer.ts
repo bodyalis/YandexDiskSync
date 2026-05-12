@@ -172,6 +172,7 @@ export class LogWriter {
                 try {
                     // Use FileManager.trashFile so the user's vault deletion
                     // preference is respected (system trash / .trash / permanent).
+                    // eslint-disable-next-line obsidianmd/no-unsupported-api
                     await this.app.fileManager.trashFile(f);
                 } catch {
                     /* ignore */
