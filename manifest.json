@@ -1,7 +1,7 @@
 {
     "id": "yandex-disk-sync",
     "name": "Yandex Disk Sync",
-    "version": "1.3.3",
+    "version": "1.3.4",
     "minAppVersion": "1.4.0",
     "description": "Two-way sync between your vault and Yandex Disk via the official Disk REST API, with conflict handling, soft delete and dry-run.",
     "author": "Bogdan Listopad",
