@@ -1,9 +1,4 @@
 // Localization (i18n)
-//
-// UI strings legitimately reference ".obsidian/" as the visible name of the
-// config folder users see in their file manager. Disable the obsidianmd rule
-// here because it cannot distinguish translation strings from runtime paths.
-/* eslint-disable obsidianmd/hardcoded-config-path */
 
 const en = {
     // Plugin meta
@@ -51,7 +46,7 @@ const en = {
     progressPhaseSyncingConfig: 'Syncing config: {0}',
     confirmEnableConfigSyncTitle: 'Sync Obsidian config?',
     confirmEnableConfigSyncDesc:
-        'This will sync your .obsidian/ folder (settings, hotkeys, themes, snippets, plugin lists) between devices via Yandex Disk.\n\nAlways excluded: workspace*, cache, this plugin\u2019s own folder.\nRecommended excludes (toggle below): plugin data.json (may contain API keys), compiled plugin files, hotkeys.\n\nUse with care — a broken setting on one machine will propagate to others. Continue?',
+        'This will sync your Obsidian config folder (settings, hotkeys, themes, snippets, plugin lists) between devices via Yandex Disk.\n\nAlways excluded: workspace*, cache, this plugin\u2019s own folder.\nRecommended excludes (toggle below): plugin data.json (may contain API keys), compiled plugin files, hotkeys.\n\nUse with care — a broken setting on one machine will propagate to others. Continue?',
     confirmEnableConfigSyncBtn: 'Enable',
 
     // Bootstrap (first-run on a new device)
@@ -61,7 +56,7 @@ const en = {
     bootstrapBtn: 'Bootstrap now',
     bootstrapConfirmTitle: 'Bootstrap from Yandex Disk?',
     bootstrapConfirmDesc:
-        'This will download EVERYTHING from "{0}" — notes and the .obsidian/ folder — into this vault, then ask you to restart Obsidian.\n\nUse this only on a fresh / empty vault. Existing local files with the same names will be OVERWRITTEN if the remote copy differs.\n\nContinue?',
+        'This will download EVERYTHING from "{0}" — notes and the Obsidian config folder — into this vault, then ask you to restart Obsidian.\n\nUse this only on a fresh / empty vault. Existing local files with the same names will be OVERWRITTEN if the remote copy differs.\n\nContinue?',
     bootstrapConfirmBtn: 'Bootstrap',
     bootstrapStarting: 'Bootstrapping vault from Yandex Disk…',
     bootstrapDoneTitle: 'Bootstrap complete',
@@ -100,9 +95,9 @@ const en = {
         'One pattern per line. Matches vault-relative paths. Use * for one segment, ** for any depth. Example: Drafts/**, **/Inbox/*.md. Lines starting with # are ignored.',
     settingExcludeGlobsPlaceholder: 'Drafts/**\n**/Inbox/*.md',
     settingObsidianConfigHeader: 'Obsidian config sync (experimental)',
-    settingSyncObsidianConfigName: 'Sync Obsidian config (.obsidian/)',
+    settingSyncObsidianConfigName: 'Sync Obsidian config folder',
     settingSyncObsidianConfigDesc:
-        'Sync settings, hotkeys, themes, snippets and the list of installed plugins between devices. workspace*, cache and this plugin\u2019s own folder are always skipped. Files are stored on Yandex Disk under .obsidian-config/.',
+        'Sync settings, hotkeys, themes, snippets and the list of installed plugins between devices. workspace*, cache and this plugin’s own folder are always skipped. Files are stored on Yandex Disk in the remote config folder.',
     settingExcludePluginDataName: 'Exclude plugin data (data.json)',
     settingExcludePluginDataDesc:
         'Recommended. Plugin data files often contain API keys, passwords or per-machine state.',
@@ -249,7 +244,7 @@ const ru: typeof en = {
     progressPhaseSyncingConfig: 'Синхронизация конфига: {0}',
     confirmEnableConfigSyncTitle: 'Синхронизировать конфиг Obsidian?',
     confirmEnableConfigSyncDesc:
-        'Папка .obsidian/ (настройки, хоткеи, темы, сниппеты, список плагинов) будет синхронизироваться между устройствами.\n\nВсегда исключаются: workspace*, cache, папка этого плагина.\nРекомендуемые исключения (переключатели ниже): data.json плагинов (в них могут быть API-ключи), собранные файлы плагинов, хоткеи.\n\nОсторожно — сломанная настройка разъедется на все машины. Продолжить?',
+        'Папка конфига Obsidian (настройки, хоткеи, темы, сниппеты, список плагинов) будет синхронизироваться между устройствами.\n\nВсегда исключаются: workspace*, cache, папка этого плагина.\nРекомендуемые исключения (переключатели ниже): data.json плагинов (в них могут быть API-ключи), собранные файлы плагинов, хоткеи.\n\nОсторожно — сломанная настройка разъедется на все машины. Продолжить?',
     confirmEnableConfigSyncBtn: 'Включить',
 
     bootstrapBtnName: 'Развернуть из Яндекс.Диска',
@@ -258,7 +253,7 @@ const ru: typeof en = {
     bootstrapBtn: 'Развернуть',
     bootstrapConfirmTitle: 'Развернуть из Я.Диска?',
     bootstrapConfirmDesc:
-        'Будет скачано ВСЁ из «{0}» — заметки и папка .obsidian/ — в этот vault, затем нужно будет перезапустить Obsidian.\n\nИспользуйте только на пустом или новом vault. Существующие файлы с теми же именами будут ПЕРЕЗАПИСАНЫ, если версия на сервере другая.\n\nПродолжить?',
+        'Будет скачано ВСЁ из «{0}» — заметки и папка конфига Obsidian — в этот vault, затем нужно будет перезапустить Obsidian.\n\nИспользуйте только на пустом или новом vault. Существующие файлы с теми же именами будут ПЕРЕЗАПИСАНЫ, если версия на сервере другая.\n\nПродолжить?',
     bootstrapConfirmBtn: 'Развернуть',
     bootstrapStarting: 'Разворачиваю Vault с Я.Диска…',
     bootstrapDoneTitle: 'Развёртывание завершено',
@@ -295,9 +290,9 @@ const ru: typeof en = {
         'Один шаблон на строку. Сравнивается с путём от корня vault. * — один уровень, ** — любая глубина. Примеры: Drafts/**, **/Inbox/*.md. Строки с # в начале игнорируются.',
     settingExcludeGlobsPlaceholder: 'Drafts/**\n**/Inbox/*.md',
     settingObsidianConfigHeader: 'Синхронизация конфига Obsidian (эксперимент)',
-    settingSyncObsidianConfigName: 'Синхронизировать конфиг Obsidian (.obsidian/)',
+    settingSyncObsidianConfigName: 'Синхронизировать конфиг Obsidian',
     settingSyncObsidianConfigDesc:
-        'Синхронизировать настройки, хоткеи, темы, сниппеты и список установленных плагинов между устройствами. workspace*, cache и папка этого плагина всегда пропускаются. Файлы хранятся на Я.Диске в .obsidian-config/.',
+        'Синхронизировать настройки, хоткеи, темы, сниппеты и список установленных плагинов между устройствами. workspace*, cache и папка этого плагина всегда пропускаются. Файлы хранятся на Я.Диске в удалённой папке конфига.',
     settingExcludePluginDataName: 'Исключить data.json плагинов',
     settingExcludePluginDataDesc:
         'Рекомендуется. В data.json часто лежат API-ключи, пароли или состояние, зависящее от машины.',
@@ -412,15 +407,6 @@ function detectLang(): typeof en {
         if (fromApi) return en;
     } catch {
         /* getLanguage may be missing on older Obsidian builds */
-    }
-    try {
-        // Fallback for Obsidian builds older than 1.8 that don't expose
-        // getLanguage(); the language preference is stored under this key.
-        // eslint-disable-next-line obsidianmd/prefer-get-language
-        const lang = window.localStorage.getItem('language');
-        if (lang === 'ru') return ru;
-    } catch {
-        /* localStorage may be unavailable on some platforms */
     }
     return en;
 }
